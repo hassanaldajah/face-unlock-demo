@@ -74,7 +74,7 @@ notes --AES-GCM, fresh random 96-bit IV on every save-->  ciphertext + authentic
 |---|---|---|
 | Random liveness challenge | 2 random actions a flat photo cannot perform | Presentation attack detection, ISO/IEC 30107 |
 | Continuous identity | The same face must stay in view during the challenge | Session binding |
-| Rate limiting + lockout | 5 failures in 60 s lock the face step for 30 s | NIST SP 800-63B caps failed biometric attempts |
+| Rate limiting + lockout | 5 failures in 60 s lock the face step; each repeat lockout is 4x longer (30 s up to 15 min) | NIST SP 800-63B caps failed biometric attempts |
 | Protected enrollment | Re-enrolling only after unlocking, so nobody can swap in their own face | Phones ask for the passcode before changing Face ID |
 | Encryption at rest | Vault notes are AES-256-GCM encrypted with a key derived from your secret | Data protection keys (iOS / Android) |
 | Audit trail | Every attempt logged, exportable as ECS-style JSON | SIEM ingestion (Elastic Common Schema) |
@@ -117,11 +117,11 @@ The log lives in memory only and never contains images or face descriptors.
 |---|---|---|
 | Photo of the owner | Blocked by the liveness challenge | Depth / infrared cameras |
 | Video replay | Usually blocked (must do the right random action in 7 s) | Depth sensing, screen-reflection and texture analysis |
-| Someone else's face, repeatedly | Rejected; lockout after 5 failures | Lockouts that survive a reload, passcode fallback |
+| Someone else's face, repeatedly | Rejected; lockout after 5 failures, longer each time | Counters in tamper-resistant storage, passcode fallback |
 | Enroll over the owner's face | Re-enroll only after unlocking | Passcode required to change biometrics |
 | Edit the JavaScript in DevTools | Passes the lock, but the vault stays encrypted | Matching inside secure hardware or on a server |
 | Copy the vault, guess offline | 600,000 PBKDF2 rounds per guess; a gesture PIN still falls in under an hour, a passphrase does not | Hardware retry limits (phones can wipe keys after 10 wrong passcodes) |
-| Reload to reset the lockout | **Not defended** | Counters in tamper-resistant storage |
+| Reload to reset the lockout | The lockout survives a reload; clearing `localStorage` resets it (documented limit) | Counters in tamper-resistant storage |
 | Steal the stored template | 128 numbers, not a photo; delete anytime | Encrypted templates in a secure enclave |
 
 Anything that runs fully in the browser can be changed by the person using the browser. The demo shows the ideas; it is not the real thing.
@@ -131,8 +131,8 @@ Anything that runs fully in the browser can be changed by the person using the b
 - Plain HTML, CSS and JavaScript (ES modules). No framework, no build step, no backend.
 - [`@vladmandic/face-api`](https://github.com/vladmandic/face-api) 1.7.15: `tinyFaceDetector` + `faceLandmark68Net` + `faceRecognitionNet` (MIT).
 - [`@mediapipe/tasks-vision`](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker) 0.10.35, the current MediaPipe **Hand Landmarker** (Apache 2.0). It uses the GPU and falls back to the CPU.
-- Libraries load from jsDelivr at pinned versions. All model weights are self-hosted in [`models/`](models/).
-- A strict Content-Security-Policy allows scripts only from this site and jsDelivr.
+- Libraries are self-hosted in `vendor/` (SHA-256 hashes in `vendor/SHA256SUMS`). All model weights are self-hosted in [`models/`](models/).
+- A strict Content-Security-Policy allows scripts only from this site.
 
 ```
 index.html     page structure: stage, controls, security lab
@@ -143,6 +143,7 @@ liveness.js    pure math: eye aspect ratio, head turn, mouth opening, random cha
 vault.js       Web Crypto: PBKDF2 key derivation, AES-GCM encrypt/decrypt, strength estimate
 eventlog.js    SOC-style event log + ECS JSON export
 xray.js        embedding heat strip + distance timeline
+vendor/        self-hosted face-api and MediaPipe libraries + SHA256SUMS
 models/        face-api weights (+ manifests) and MediaPipe hand_landmarker.task
 ```
 
@@ -174,16 +175,8 @@ The first start downloads about 15 MB of models and libraries. After that the br
 - Without the liveness check, **a photo can unlock it**. With it, a photo fails, but a good video replay that happens to do the right actions, or a 3D mask, could still pass. Real systems use depth or infrared sensors.
 - The 0.5 distance threshold is the common face-api default. Lookalikes or siblings can match, and bad lighting can stop a real match.
 - Strong backlight, very dim rooms, sunglasses and big head turns make the face and hand trackers less reliable.
-- Everything is client-side, so anyone can change the code in DevTools or reload to reset the lockout.
+- Everything is client-side, so anyone can change the code in DevTools or clear `localStorage` to reset the lockout.
 - Performance depends on the device; older phones may track hands at a low frame rate.
-
-## Embed
-
-```html
-<iframe src="https://face.al-hassan.dev" allow="camera" width="100%" height="900" style="border:0"></iframe>
-```
-
-`allow="camera"` is required: without it the browser blocks the camera inside the iframe.
 
 ## Credits
 

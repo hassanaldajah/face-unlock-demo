@@ -13,7 +13,7 @@
  * Everything runs in this tab. The camera stream is never sent anywhere; the
  * only thing stored is one 128-number face descriptor in localStorage.
  *
- * Libraries (loaded from jsDelivr at pinned versions, model weights from ./models):
+ * Libraries (self-hosted in ./vendor, hashes in vendor/SHA256SUMS; model weights from ./models):
  *   - @vladmandic/face-api : face detection, 68 landmarks, 128-d face descriptor
  *   - @mediapipe/tasks-vision HandLandmarker : 21 hand landmarks per hand
  */

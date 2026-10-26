@@ -7,8 +7,8 @@
   <meta name="description" content="Educational biometric security lab: face match, liveness check and hand-gesture unlock, with a red-team mode and a SOC-style event log. Runs 100% in your browser.">
   <meta name="theme-color" content="#05080d">
   <!--
-    Content Security Policy: scripts only from this site and the jsDelivr CDN
-    (face-api + MediaPipe). 'wasm-unsafe-eval' lets MediaPipe compile its
+    Content Security Policy: scripts only from this site
+    (face-api + MediaPipe are self-hosted in vendor/). 'wasm-unsafe-eval' lets MediaPipe compile its
     WebAssembly; nothing here can send data to any other server.
   -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; style-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">

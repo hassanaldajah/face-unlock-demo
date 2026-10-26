@@ -144,6 +144,25 @@ let distanceHistory = [];    // { t, d } for the X-ray chart (d = null: no face)
 let live = null;             // running liveness check, see startLiveness()
 let failures = [];           // times of recent failed attempts
 let lockedUntil = 0;
+
+// Lockout that survives a reload. performance.now() restarts at 0 on every load, so the
+// deadline is also stored as a wall-clock time. (Still client-side: DevTools can clear it.)
+const LOCK_KEY = 'face-unlock-demo:lockout:v1';
+const LOCK_MAX_MS = 15 * 60 * 1000;
+function readLockState() {
+  try {
+    const s = JSON.parse(localStorage.getItem(LOCK_KEY) || 'null');
+    if (s && Number.isFinite(s.until) && Number.isFinite(s.strikes)) return s;
+  } catch { /* storage blocked or corrupt: start fresh */ }
+  return { until: 0, strikes: 0 };
+}
+function writeLockState(state) {
+  try { localStorage.setItem(LOCK_KEY, JSON.stringify(state)); } catch { /* in-memory lockout only */ }
+}
+{
+  const left = readLockState().until - Date.now();
+  if (left > 0) lockedUntil = performance.now() + Math.min(left, LOCK_MAX_MS);
+}
 let mismatchSince = null;
 let mismatchLoggedAt = null;
 
@@ -733,12 +752,17 @@ function registerFailure(action, message, fields) {
   failures.push(now);
 
   if (failures.length >= CONFIG.maxFailures) {
-    lockedUntil = now + CONFIG.lockoutMs;
+    // each new lockout is 4x longer (30 s, 2 min, 8 min, max 15 min); strikes fade after 10 min
+    const prev = readLockState();
+    const strikes = Date.now() - prev.until > 10 * 60 * 1000 ? 1 : prev.strikes + 1;
+    const lockoutMs = Math.min(CONFIG.lockoutMs * 4 ** (strikes - 1), LOCK_MAX_MS);
+    lockedUntil = now + lockoutMs;
+    writeLockState({ until: Date.now() + lockoutMs, strikes });
     failures = [];
     log.add('lockout', {
       level: 'alert', outcome: 'failure',
-      message: `${CONFIG.maxFailures} failed attempts within ${CONFIG.failureWindowMs / 1000} s: face step locked for ${CONFIG.lockoutMs / 1000} s (possible spoofing or brute force)`,
-      fields: { failed_attempts: CONFIG.maxFailures, lockout_seconds: CONFIG.lockoutMs / 1000 },
+      message: `${CONFIG.maxFailures} failed attempts within ${CONFIG.failureWindowMs / 1000} s: face step locked for ${lockoutMs / 1000} s (possible spoofing or brute force)`,
+      fields: { failed_attempts: CONFIG.maxFailures, lockout_seconds: lockoutMs / 1000, strikes },
     });
     if (mode !== 'face') setMode('face');
     showLockout(now);
@@ -921,7 +945,8 @@ function expireHands(now) {
 
 function lock(method) {
   fistSince = null;
-  log.add('lock', { message: `Locked again (${method === 'fist' ? 'fist gesture' : 'button'})`, fields: { method } });
+  const how = { fist: 'fist gesture', idle: 'inactivity', hidden: 'tab hidden' }[method] ?? 'button';
+  log.add('lock', { message: `Locked again (${how})`, fields: { method } });
   setMode('face');
   setStatus('Locked. Look at the camera to unlock again.');
 }
@@ -954,7 +979,7 @@ function renderVault() {
   } else if (vault.record) {
     status = 'Vault found. Enter your gesture PIN or passphrase to decrypt it.';
   } else {
-    status = 'No vault yet. Choose a secret: a 6-digit gesture PIN (1 to 5 fingers per digit) or a passphrase.';
+    status = 'No vault yet. Choose a secret: a 6-digit gesture PIN (quick, but weak) or a passphrase of 12+ characters (strong).';
   }
   if (!vault.busy) els.vaultStatus.textContent = status;
   els.vaultSecretForm.hidden = !unlocked || open;
@@ -988,7 +1013,8 @@ function updateStrength() {
   if (vault.msPerGuess) {
     text += `. Trying all of them on this device: ${formatDuration(guesses * vault.msPerGuess)} (a GPU cracker is far faster)`;
   }
-  els.vaultStrength.textContent = secret.length < 6 ? `At least 6 characters. ${text}` : text;
+  const need = /^[1-5]+$/.test(secret) ? 6 : 12;
+  els.vaultStrength.textContent = secret.length < need ? `At least ${need} characters. ${text}` : text;
 }
 
 const formatCount = (n) => (n < 1e9 ? Math.round(n).toLocaleString('en') : `about 10^${Math.round(Math.log10(n))}`);
@@ -1015,8 +1041,11 @@ async function benchmarkKdf() {
 /** Create the vault (first time) or decrypt it. The secret itself is never stored or logged. */
 async function submitSecret(secret, source) {
   if (vault.busy || mode !== 'unlocked') return;
-  if (secret.length < 6) {
-    els.vaultStatus.textContent = 'Use at least 6 digits or characters.';
+  const minLength = source === 'passphrase' ? 12 : 6;
+  if (secret.length < minLength) {
+    els.vaultStatus.textContent = source === 'passphrase'
+      ? 'A passphrase needs at least 12 characters. (A 6-digit PIN is the quick but weaker option.)'
+      : 'Use at least 6 digits.';
     return;
   }
   vault.busy = true;
@@ -1089,6 +1118,23 @@ function closeVault() {
   stopPinEntry();
   renderVault();
 }
+
+// Auto-lock: 2 minutes without input, or the tab hidden for 15 s. setMode('face') calls
+// closeVault(), so the key and the plaintext notes are dropped from memory too.
+const IDLE_LOCK_MS = 120000;
+const HIDDEN_LOCK_MS = 15000;
+let lastInputAt = Date.now();
+let hiddenAt = 0;
+for (const type of ['pointerdown', 'pointermove', 'keydown', 'touchstart']) {
+  addEventListener(type, () => { lastInputAt = Date.now(); }, { passive: true });
+}
+document.addEventListener('visibilitychange', () => { hiddenAt = document.hidden ? Date.now() : 0; });
+setInterval(() => {
+  if (mode !== 'unlocked') { lastInputAt = Date.now(); return; }
+  if (vault.pin || vault.busy) return; // typing a gesture PIN, or deriving the key
+  if (document.hidden && hiddenAt && Date.now() - hiddenAt > HIDDEN_LOCK_MS) lock('hidden');
+  else if (Date.now() - lastInputAt > IDLE_LOCK_MS) lock('idle');
+}, 1000);
 
 // ---- Gesture PIN: finger counts typed one digit at a time ----
 

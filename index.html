@@ -193,7 +193,7 @@
             <ul class="defences">
               <li><b>Random liveness challenge.</b> 2 of: blink, turn left, turn right, open mouth. The idea behind presentation attack detection (ISO/IEC 30107).</li>
               <li><b>Continuous identity.</b> The same face must stay in view during the challenge; swapping faces fails it.</li>
-              <li><b>Rate limiting.</b> 5 failed attempts in 60 s lock the face step for 30 s. NIST SP 800-63B also caps failed biometric attempts.</li>
+              <li><b>Rate limiting.</b> 5 failed attempts in 60 s lock the face step for 30 s, then 2 min, 8 min, up to 15 min. NIST SP 800-63B also caps failed biometric attempts.</li>
               <li><b>Protected enrollment.</b> Re-enrolling is only possible after unlocking, so nobody can swap in their own face.</li>
               <li><b>Encryption at rest.</b> The vault is AES-256-GCM encrypted with a key derived from your secret; bypassing the lock only reveals ciphertext.</li>
               <li><b>Audit trail.</b> Every attempt is logged below and can be exported as ECS-style JSON for a SIEM.</li>
@@ -278,7 +278,7 @@
                 <tr><td>Enroll your own face over the owner's</td><td>Takes over</td><td>Re-enroll only after unlocking</td><td>Passcode required to change biometrics</td></tr>
                 <tr><td>Edit the JavaScript in DevTools</td><td>Bypasses everything</td><td>Passes the lock (checks run in your browser), but the vault stays encrypted</td><td>Matching inside secure hardware or on a server</td></tr>
                 <tr><td>Copy the vault and guess the secret offline</td><td>Plain text, nothing to guess</td><td>Each guess costs 600,000 PBKDF2 rounds. A 6-digit gesture PIN (15,625 options) still falls in under an hour; a long passphrase does not</td><td>Hardware retry limits (a phone can wipe its keys after 10 wrong passcodes)</td></tr>
-                <tr><td>Reload the page to reset the lockout</td><td>Resets</td><td><b>Not defended</b>: the lockout lives in memory</td><td>Counters stored in tamper-resistant storage</td></tr>
+                <tr><td>Reload the page to reset the lockout</td><td>Resets</td><td>Blocked: the deadline is saved in localStorage and each lockout is 4x longer. <b>Still not defended</b> against clearing storage in DevTools</td><td>Counters on a server or in tamper-resistant storage</td></tr>
                 <tr><td>Steal the stored face template</td><td>Readable in localStorage</td><td>Only 128 numbers, not a photo; delete anytime</td><td>Encrypted templates in a secure enclave</td></tr>
               </tbody>
             </table>

@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Face + Gesture Unlock</title>
+  <meta name="description" content="Educational biometric security lab: face match, liveness check and hand-gesture unlock, with a red-team mode and a SOC-style event log. Runs 100% in your browser.">
+  <meta name="theme-color" content="#05080d">
+  <!--
+    Content Security Policy: scripts only from this site and the jsDelivr CDN
+    (face-api + MediaPipe). 'wasm-unsafe-eval' lets MediaPipe compile its
+    WebAssembly; nothing here can send data to any other server.
+  -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; style-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <div class="brand">
+        <svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><circle cx="12" cy="11" r="3.2"/><path d="M7.5 17.5a5 5 0 0 1 9 0"/></svg>
+        <span>Face&nbsp;+&nbsp;Gesture&nbsp;Unlock</span>
+      </div>
+      <!-- Step indicator: Face -> Live -> Hand -> Unlocked -->
+      <ol class="steps" aria-label="Progress">
+        <li class="step" data-step="face"><span class="dot"></span>Face</li>
+        <li class="step" data-step="liveness"><span class="dot"></span>Live</li>
+        <li class="step" data-step="hand"><span class="dot"></span>Hand</li>
+        <li class="step" data-step="unlocked"><span class="dot">✓</span>Unlocked</li>
+      </ol>
+    </header>
+
+    <main>
+      <!-- The stage: mirrored camera video + one canvas overlay for drawings -->
+      <section class="stage" id="stage" data-state="landing">
+        <video id="video" playsinline muted autoplay></video>
+        <canvas id="overlay" aria-hidden="true"></canvas>
+
+        <!-- Scanner decoration: corner brackets + sweeping line -->
+        <div class="frame" aria-hidden="true">
+          <span class="corner tl"></span><span class="corner tr"></span>
+          <span class="corner bl"></span><span class="corner br"></span>
+          <span class="scanline"></span>
+        </div>
+
+        <!-- Landing / consent screen (camera starts only after the click) -->
+        <div class="panel landing" id="landing">
+          <h1>Face + Gesture Unlock</h1>
+          <p class="consent">This demo uses your camera locally in your browser. No data is uploaded. Face data is stored only in your browser's localStorage and you can delete it anytime.</p>
+          <button class="btn primary" id="startBtn" type="button">Start camera</button>
+          <p class="error" id="errorMsg" role="alert" hidden></p>
+        </div>
+
+        <!-- Liveness challenge prompt -->
+        <div class="challenge" id="challenge" hidden>
+          <p class="challenge-step" id="challengeStep">Liveness check 1 / 2</p>
+          <div class="challenge-body">
+            <span class="challenge-icon" id="challengeIcon" aria-hidden="true"></span>
+            <p class="challenge-text" id="challengeText" aria-live="assertive">Blink slowly</p>
+          </div>
+          <div class="challenge-timer"><span id="challengeTimer"></span></div>
+        </div>
+
+        <!-- Rate-limit lockout -->
+        <div class="panel lockout" id="lockout" hidden>
+          <p class="lockout-title">Locked out</p>
+          <p class="lockout-count"><span id="lockoutCount">30</span><small>s</small></p>
+          <p class="hint">Too many failed attempts in a short time. This is rate limiting: it slows down anyone trying photos or faces one after another.</p>
+        </div>
+
+        <!-- Slide to unlock, driven by the hand cursor -->
+        <div class="slider" id="slider" hidden>
+          <div class="track" id="track">
+            <div class="fill" id="fill"></div>
+            <span class="track-label">pinch &amp; slide to unlock</span>
+            <div class="handle" id="handle" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
+            </div>
+          </div>
+        </div>
+
+        <!-- Success screen -->
+        <div class="panel success" id="success" hidden>
+          <div class="lock-anim" aria-hidden="true">
+            <svg viewBox="0 0 64 64">
+              <path class="shackle" d="M20 28v-8a12 12 0 0 1 24 0"/>
+              <rect class="body" x="14" y="28" width="36" height="26" rx="5"/>
+              <path class="check" d="M24 41l6 6 11-12"/>
+            </svg>
+          </div>
+          <h2>Unlocked</h2>
+          <p class="hint">Hold a closed fist for 1 second, or press the button, to lock again.</p>
+          <div class="row">
+            <button class="btn primary" id="lockBtn" type="button">Lock again</button>
+          </div>
+        </div>
+
+        <!-- Gesture PIN pad (vault) -->
+        <div class="panel pinpad" id="pinpad" hidden>
+          <p class="challenge-step">Gesture PIN</p>
+          <p class="pin-count" id="pinCount">–</p>
+          <div class="pin-dots" id="pinDots" aria-label="Digits entered"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <p class="pin-hint">Show 1 to 5 fingers and hold. Close your hand between two equal digits.</p>
+          <button class="btn small" id="pinCancel" type="button">Cancel</button>
+        </div>
+      </section>
+
+      <!-- Live status: what the app is doing + face distance meter -->
+      <section class="status" aria-live="polite">
+        <p class="status-text" id="statusText">Waiting for you to start the camera.</p>
+        <div class="meter" id="meter" hidden>
+          <div class="meter-bar"><span id="meterFill"></span><i class="meter-threshold" id="meterThreshold" title="match threshold"></i></div>
+          <p class="meter-label"><span id="distanceText">distance -</span> <span class="muted" id="thresholdText">match &lt; 0.50, held 1 s</span></p>
+        </div>
+        <div class="progress" id="enrollProgress" hidden>
+          <div class="progress-bar"><span id="enrollFill"></span></div>
+          <p class="meter-label" id="enrollText">Sample 0 / 5</p>
+        </div>
+      </section>
+
+      <section class="controls">
+        <button class="btn primary" id="enrollBtn" type="button" disabled>Enroll my face</button>
+        <button class="btn danger" id="deleteBtn" type="button" disabled>Delete my face data</button>
+      </section>
+
+      <ul class="legend" aria-label="Gesture controls">
+        <li><span class="g g-pinch" aria-hidden="true"></span><b>pinch</b> = grab</li>
+        <li><span class="g g-move" aria-hidden="true"></span><b>move</b> = drag</li>
+        <li><span class="g g-fist" aria-hidden="true"></span><b>fist</b> = lock</li>
+      </ul>
+
+      <!-- Encrypted vault: what the lock actually protects -->
+      <article class="card vault" id="vaultCard">
+        <h3><span class="tag tag-vault">Vault</span> Encrypted notes behind the lock</h3>
+        <p class="vault-status" id="vaultStatus" aria-live="polite">Locked.</p>
+
+        <div id="vaultSecretForm" hidden>
+          <div class="vault-row">
+            <button class="btn primary small" id="gesturePinBtn" type="button">Enter PIN with my hand</button>
+            <input type="password" id="vaultSecret" placeholder="or type a PIN / passphrase" autocomplete="off" spellcheck="false" aria-label="PIN or passphrase">
+            <button class="btn small" id="vaultSubmit" type="button">Create vault</button>
+          </div>
+          <p class="muted small" id="vaultStrength"></p>
+          <p class="muted small">Forget the secret and the notes are gone: there is no reset, because nobody else has the key. That is what encryption means.</p>
+        </div>
+
+        <div id="vaultOpen" hidden>
+          <textarea id="vaultNotes" rows="4" maxlength="5000" placeholder="Write something only you should read…" aria-label="Secret notes"></textarea>
+          <div class="vault-row">
+            <button class="btn primary small" id="vaultSave" type="button">Encrypt &amp; save</button>
+            <button class="btn small" id="vaultLock" type="button">Lock vault</button>
+          </div>
+        </div>
+        <div class="vault-row"><button class="btn danger small" id="vaultDelete" type="button" hidden>Delete vault</button></div>
+
+        <details class="attacker">
+          <summary>Attacker view: what is actually stored in this browser</summary>
+          <pre id="vaultRaw">(nothing stored yet)</pre>
+          <button class="btn small" id="tamperBtn" type="button" disabled>Tamper test: flip 1 bit and try to decrypt</button>
+          <p class="muted small" id="tamperResult"></p>
+        </details>
+        <p class="muted small">Your secret goes through PBKDF2-SHA256 (600,000 rounds, random salt) to make an AES-256-GCM key. Only the salt, a random IV and the ciphertext are stored. Even if someone bypasses the face check by editing the code, they get this ciphertext, not your notes.</p>
+      </article>
+
+      <p class="disclaimer"><b>Educational demo.</b> Camera-based face matching can be fooled by photos and is not suitable for real security.</p>
+
+      <!-- ================= Security lab ================= -->
+      <section class="lab" aria-labelledby="labTitle">
+        <header class="lab-head">
+          <h2 id="labTitle">Security lab</h2>
+          <p>Attack it, watch the defences react, read the log. Red team + blue team = purple team.</p>
+        </header>
+
+        <div class="lab-grid">
+          <article class="card team red">
+            <h3><span class="tag tag-red">Red team</span> Try to fool it</h3>
+            <ol class="attacks">
+              <li><b>Photo attack.</b> Turn the switch below off, then hold a photo of yourself (on your phone) up to the camera. Face matching alone lets it in.</li>
+              <li><b>Same photo, liveness on.</b> Turn the switch back on: the photo cannot blink, turn or open its mouth on command, so it fails.</li>
+              <li><b>Brute force.</b> Fail 5 times in a minute (someone else's face, or the photo) and watch the lockout and the alert in the log.</li>
+            </ol>
+            <label class="switch">
+              <input type="checkbox" id="livenessToggle" checked>
+              <span class="switch-ui" aria-hidden="true"></span>
+              <span><b>Liveness check</b> <span class="muted">(anti-spoofing)</span></span>
+            </label>
+          </article>
+
+          <article class="card team blue">
+            <h3><span class="tag tag-blue">Blue team</span> Defences in place</h3>
+            <ul class="defences">
+              <li><b>Random liveness challenge.</b> 2 of: blink, turn left, turn right, open mouth. The idea behind presentation attack detection (ISO/IEC 30107).</li>
+              <li><b>Continuous identity.</b> The same face must stay in view during the challenge; swapping faces fails it.</li>
+              <li><b>Rate limiting.</b> 5 failed attempts in 60 s lock the face step for 30 s. NIST SP 800-63B also caps failed biometric attempts.</li>
+              <li><b>Protected enrollment.</b> Re-enrolling is only possible after unlocking, so nobody can swap in their own face.</li>
+              <li><b>Encryption at rest.</b> The vault is AES-256-GCM encrypted with a key derived from your secret; bypassing the lock only reveals ciphertext.</li>
+              <li><b>Audit trail.</b> Every attempt is logged below and can be exported as ECS-style JSON for a SIEM.</li>
+            </ul>
+            <p class="fails">Failed attempts in the last 60 s: <b id="failCount">0</b> / 5</p>
+          </article>
+        </div>
+
+        <label class="switch xray-switch">
+          <input type="checkbox" id="xrayToggle">
+          <span class="switch-ui" aria-hidden="true"></span>
+          <span><b>X-ray view</b> <span class="muted">(see what the matcher sees)</span></span>
+        </label>
+
+        <!-- X-ray: embedding, distance timeline, metrics, threshold -->
+        <article class="card xray" id="xrayCard" hidden>
+          <h3>X-ray: what the matcher sees</h3>
+
+          <div class="stats">
+            <div class="stat"><span>Eye openness</span><b id="statEar">-</b></div>
+            <div class="stat"><span>Head turn <small class="muted">(nose on jaw line)</small></span><b id="statYaw">-</b></div>
+            <div class="stat"><span>Mouth open</span><b id="statMouth">-</b></div>
+            <div class="stat"><span>Face model</span><b id="statDetect">-</b></div>
+            <div class="stat"><span>Hand tracking</span><b id="statHands">-</b></div>
+          </div>
+
+          <figure class="viz">
+            <figcaption><b>Face embedding</b>: your face as 128 numbers. Matching compares these, not pictures.</figcaption>
+            <div class="embed">
+              <div class="embed-labels" aria-hidden="true"><span>enrolled</span><span>live</span><span>difference</span></div>
+              <div class="plot">
+                <canvas id="embedCanvas" class="embed-canvas" role="img" aria-label="Heat strip of the enrolled and live face descriptors and their difference"></canvas>
+                <div class="tip" id="embedTip" hidden></div>
+              </div>
+            </div>
+            <div class="scales" aria-hidden="true">
+              <span class="scale"><small>-0.2</small><i class="ramp ramp-div"></i><small>+0.2</small> value</span>
+              <span class="scale"><small>0</small><i class="ramp ramp-seq"></i><small>0.15</small> difference</span>
+            </div>
+            <p class="muted small" id="diffText">Waiting for a live face…</p>
+          </figure>
+
+          <figure class="viz">
+            <figcaption><b>Match distance</b>, last 20 seconds. Below the dashed threshold line = match.</figcaption>
+            <div class="plot">
+              <canvas id="distChart" class="dist-canvas" role="img" aria-label="Line chart of the live match distance against the threshold"></canvas>
+              <div class="tip" id="chartTip" hidden></div>
+            </div>
+          </figure>
+
+          <div class="threshold">
+            <label for="thresholdInput">Match threshold <b id="thresholdValue">0.50</b></label>
+            <input type="range" id="thresholdInput" min="0.30" max="0.70" step="0.01" value="0.50">
+            <p class="muted small">Lower = stricter: strangers are rejected, but so are you in bad light (false rejects). Higher = looser: you always pass, and so might a lookalike (false accepts). Every biometric system picks a point on this trade-off.</p>
+          </div>
+        </article>
+
+        <!-- SOC-style event log -->
+        <article class="card log">
+          <div class="card-head">
+            <h3><span class="tag tag-blue">SOC</span> Security events</h3>
+            <div class="row">
+              <button class="btn small" id="exportBtn" type="button">Export JSON</button>
+              <button class="btn small" id="clearLogBtn" type="button">Clear</button>
+            </div>
+          </div>
+          <p class="muted small">Kept in memory only (gone when you close the tab). No images or face data, just events and distances.</p>
+          <p class="empty" id="logEmpty">No events yet.</p>
+          <ol class="log-list" id="logList"></ol>
+        </article>
+
+        <!-- Threat model -->
+        <details class="card threats">
+          <summary><h3>Threat model: how could someone get in?</h3></summary>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Attack</th><th>Without defences</th><th>In this demo</th><th>What real systems add</th></tr></thead>
+              <tbody>
+                <tr><td>Photo of the owner (print or phone)</td><td>Unlocks</td><td>Blocked by the random liveness challenge</td><td>Depth / infrared cameras (e.g. Face ID)</td></tr>
+                <tr><td>Video of the owner (replay)</td><td>Unlocks</td><td>Usually blocked: it must do the right random action within 7 s</td><td>Depth sensing, screen-reflection and texture analysis</td></tr>
+                <tr><td>Someone else's face, again and again</td><td>Unlimited tries</td><td>Rejected by distance; 5 failures lock it for 30 s</td><td>Lockouts that survive a reload, fallback to a passcode</td></tr>
+                <tr><td>Enroll your own face over the owner's</td><td>Takes over</td><td>Re-enroll only after unlocking</td><td>Passcode required to change biometrics</td></tr>
+                <tr><td>Edit the JavaScript in DevTools</td><td>Bypasses everything</td><td>Passes the lock (checks run in your browser), but the vault stays encrypted</td><td>Matching inside secure hardware or on a server</td></tr>
+                <tr><td>Copy the vault and guess the secret offline</td><td>Plain text, nothing to guess</td><td>Each guess costs 600,000 PBKDF2 rounds. A 6-digit gesture PIN (15,625 options) still falls in under an hour; a long passphrase does not</td><td>Hardware retry limits (a phone can wipe its keys after 10 wrong passcodes)</td></tr>
+                <tr><td>Reload the page to reset the lockout</td><td>Resets</td><td><b>Not defended</b>: the lockout lives in memory</td><td>Counters stored in tamper-resistant storage</td></tr>
+                <tr><td>Steal the stored face template</td><td>Readable in localStorage</td><td>Only 128 numbers, not a photo; delete anytime</td><td>Encrypted templates in a secure enclave</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="muted small">The last three rows are the honest part: a browser demo can show the ideas, but anything that runs fully on the client can be changed by the client.</p>
+        </details>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <span>Runs 100% in your browser. No uploads, no analytics.</span>
+      <a href="https://github.com/hassanaldajah/face-unlock-demo" target="_blank" rel="noopener">Source on GitHub</a>
+    </footer>
+  </div>
+</body>
+</html>

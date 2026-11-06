@@ -2,8 +2,9 @@
  * i18n.js: English and Arabic.
  *
  * English text is the key, so code reads normally: t('Camera not started.').
- * lang-init.js has already set <html lang dir> before the page paints; this
- * module takes the language from there and can switch it live.
+ * lang-init.js has already chosen the language before the page paints. This
+ * module loads on its own, ahead of the much larger app.js, so Arabic readers
+ * see Arabic right away even on a slow connection. It can also switch live.
  *
  *   t(text, vars)      text in the current language, {name} filled from vars
  *   en(text, vars)     always English (exported logs stay in one language)
@@ -19,7 +20,8 @@ import { AR } from './i18n-ar.js';
 
 const STORAGE_KEY = 'face-unlock-demo:lang';
 
-export let lang = document.documentElement.lang === 'ar' ? 'ar' : 'en';
+const html = document.documentElement;
+export let lang = html.dataset.lang === 'ar' ? 'ar' : 'en';
 
 function fill(dict, text, vars) {
   const template = (dict && Object.hasOwn(dict, text)) ? dict[text] : text;
@@ -100,7 +102,6 @@ export const onLanguageChange = (fn) => listeners.push(fn);
 
 export function setLanguage(next) {
   lang = next === 'ar' ? 'ar' : 'en';
-  const html = document.documentElement;
   html.lang = lang;
   html.dir = lang === 'ar' ? 'rtl' : 'ltr';
   try { localStorage.setItem(STORAGE_KEY, lang); } catch { /* storage blocked: lasts until reload */ }
@@ -115,4 +116,18 @@ export function setLanguage(next) {
   applyStatic();
   for (const [el, msg] of bound) el.textContent = t(msg.text, msg.vars);
   for (const fn of listeners) fn();
+}
+
+// ---------- First paint ----------
+
+if (lang === 'ar') {
+  html.lang = 'ar';
+  html.dir = 'rtl';
+  applyStatic();
+  const button = document.getElementById('langBtn');
+  if (button) {
+    button.textContent = 'English';
+    button.lang = 'en';
+  }
+  html.classList.remove('i18n-pending');
 }

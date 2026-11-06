@@ -13,13 +13,21 @@
   }
   if (lang !== 'ar' && lang !== 'en') lang = /^ar\b/i.test(navigator.language || '') ? 'ar' : 'en';
 
+  html.dataset.lang = lang; // the choice, for i18n.js
   html.lang = lang;
   html.dir = lang === 'ar' ? 'rtl' : 'ltr';
 
   if (lang === 'ar') {
-    // Hidden until the Arabic text is in place, with a limit so a slow load can never hide the page
+    // Hidden until the Arabic text is in place. On a very slow connection, show the page in
+    // readable English instead of waiting, or of mixing English text with a right-to-left layout.
+    // i18n.js switches to Arabic as soon as it arrives.
     html.classList.add('i18n-pending');
-    setTimeout(function () { html.classList.remove('i18n-pending'); }, 1500);
+    setTimeout(function () {
+      if (!html.classList.contains('i18n-pending')) return;
+      html.classList.remove('i18n-pending');
+      html.lang = 'en';
+      html.dir = 'ltr';
+    }, 3000);
 
     ['vendor/fonts/noto-naskh-arabic-variable.woff2', 'vendor/fonts/ibm-plex-sans-arabic-400.woff2'].forEach(function (href) {
       var link = document.createElement('link');

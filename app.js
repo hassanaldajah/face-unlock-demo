@@ -23,6 +23,7 @@ import {
   Debounce, videoToBox, euclidean, averageVectors, countFingers, DigitEntry,
 } from './gestures.js';
 import { FACE68, faceMetrics, medianMetrics, CHALLENGES, pickChallenges } from './liveness.js';
+import { SIGNS, classifySign, SignReader } from './signs.js';
 import { EventLog } from './eventlog.js';
 import { createXray } from './xray.js';
 import {
@@ -34,6 +35,10 @@ import {
 // Configuration: every tunable number in one place
 // ---------------------------------------------------------------------------
 
+// Phones and small laptops have far less CPU, GPU and memory, and everything here runs on
+// the main thread, so they get a lighter setup. Touch screen or 4 cores or fewer = low power.
+const LOW_POWER = matchMedia('(pointer: coarse)').matches || (navigator.hardwareConcurrency || 8) <= 4;
+
 const CONFIG = {
   faceApiUrl: './vendor/face-api/face-api.esm.js',
   visionUrl: './vendor/tasks-vision/vision_bundle.mjs',
@@ -44,7 +49,8 @@ const CONFIG = {
   // Face
   defaultThreshold: 0.5, // Euclidean distance below this = same person (adjustable in X-ray)
   matchHoldMs: 1000,     // must stay below the threshold this long
-  faceIntervalMs: 350,   // how often to compare the live face
+  faceIntervalMs: LOW_POWER ? 500 : 350, // how often to compare the live face
+  faceInputSize: LOW_POWER ? 224 : 320,  // detector input: smaller = faster, slightly less range
   enrollSamples: 5,
   enrollIntervalMs: 500, // 5 samples x 500 ms ≈ 2.5 s
   enrollTimeoutMs: 20000,
@@ -56,6 +62,7 @@ const CONFIG = {
   livenessSlack: 0.15,     // head turns change the descriptor a bit: allow threshold + this
   livenessLostMs: 1500,    // face gone this long during the check = fail
   descriptorEvery: 3,      // during the check, compute the (slow) descriptor every 3rd frame
+  livenessGapMs: LOW_POWER ? 40 : 0, // breathing room between frames so the page stays responsive
 
   // Rate limiting
   maxFailures: 5,          // failed attempts within the window...
@@ -65,6 +72,8 @@ const CONFIG = {
   mismatchRepeatMs: 5000,  // ...and another one every 5 s it stays
 
   // Hand
+  handIntervalMs: LOW_POWER ? 66 : 0, // at most ~15 hand detections per second on low-power devices
+  numHands: LOW_POWER ? 1 : 2,
   cursorLerp: 0.3,       // low-pass filter for the fingertip cursor (per frame at 60 fps)
   pinchOn: 0.35,         // pinch starts below 0.35 x hand size...
   pinchOff: 0.5,         // ...and ends above 0.5 (hysteresis stops flicker)
@@ -99,18 +108,21 @@ const els = {
   meter: $('meter'), meterFill: $('meterFill'), meterThreshold: $('meterThreshold'),
   distanceText: $('distanceText'), thresholdText: $('thresholdText'),
   enrollProgress: $('enrollProgress'), enrollFill: $('enrollFill'), enrollText: $('enrollText'),
-  enrollBtn: $('enrollBtn'), deleteBtn: $('deleteBtn'),
+  signEntry: $('signEntry'), signBtn: $('signBtn'), signScreen: $('signScreen'), signStop: $('signStop'),
+  signEmoji: $('signEmoji'), signWord: $('signWord'), signAr: $('signAr'), signMeaning: $('signMeaning'),
+  signTag: $('signTag'), signList: $('signList'),
+  controls: $('controls'), enrollBtn: $('enrollBtn'), deleteBtn: $('deleteBtn'), trackLabel: $('trackLabel'),
   steps: document.querySelectorAll('.step'), livenessStep: document.querySelector('.step[data-step="liveness"]'),
   livenessToggle: $('livenessToggle'), failCount: $('failCount'),
-  xrayToggle: $('xrayToggle'), xrayCard: $('xrayCard'),
+  xrayToggle: $('xrayToggle'), xrayCard: $('xrayCard'), xrayFold: $('xrayFold'),
   statEar: $('statEar'), statYaw: $('statYaw'), statMouth: $('statMouth'),
   statDetect: $('statDetect'), statHands: $('statHands'),
   thresholdInput: $('thresholdInput'), thresholdValue: $('thresholdValue'),
-  logList: $('logList'), logEmpty: $('logEmpty'), exportBtn: $('exportBtn'), clearLogBtn: $('clearLogBtn'),
+  logList: $('logList'), logEmpty: $('logEmpty'), exportBtn: $('exportBtn'),
   vaultCard: $('vaultCard'), pinpad: $('pinpad'), pinCount: $('pinCount'), pinDots: $('pinDots'), pinCancel: $('pinCancel'),
   vaultStatus: $('vaultStatus'), vaultSecretForm: $('vaultSecretForm'), vaultSecret: $('vaultSecret'),
   gesturePinBtn: $('gesturePinBtn'), vaultSubmit: $('vaultSubmit'), vaultStrength: $('vaultStrength'),
-  vaultOpen: $('vaultOpen'), vaultNotes: $('vaultNotes'), vaultSave: $('vaultSave'), vaultLock: $('vaultLock'),
+  vaultOpen: $('vaultOpen'), vaultNotes: $('vaultNotes'), vaultSave: $('vaultSave'),
   vaultDelete: $('vaultDelete'), vaultRaw: $('vaultRaw'), tamperBtn: $('tamperBtn'), tamperResult: $('tamperResult'),
 };
 const ctx = els.overlay.getContext('2d');
@@ -128,7 +140,14 @@ const xray = createXray({
 let mode = 'landing';
 let faceapi = null;          // face-api module, loaded on demand
 let detectorOptions = null;
+let modelsLoading = null;     // promise for the face models, cleared on failure so a retry reloads them
 let handLandmarker = null;
+let handLoading = false;     // hand tracking is downloaded when it is first needed
+let handFailed = false;      // this device cannot run it: the slider falls back to touch
+let lastHandAt = -Infinity;
+const signReader = new SignReader();
+let signCloseCamera = false; // the translator started the camera, so it also stops it
+let shownSign = undefined;
 let stream = null;
 let enrolled = null;         // Float32Array(128) or null
 
@@ -248,7 +267,7 @@ const STEP_ORDER = { face: 0, liveness: 1, hand: 2, unlocked: 3 };
 function updateSteps() {
   els.livenessStep.hidden = !settings.liveness;
   const current = STEP_ORDER[mode] ?? 0;
-  const started = !['landing', 'loading'].includes(mode);
+  const started = !['landing', 'loading', 'signs'].includes(mode);
   for (const li of els.steps) {
     const i = STEP_ORDER[li.dataset.step];
     li.classList.toggle('active', started && i === current);
@@ -273,12 +292,17 @@ function setMode(next) {
   els.enrollProgress.hidden = next !== 'enrolling';
   // Replacing the template is only allowed when none exists or after unlocking:
   // otherwise anyone could enroll their own face and walk in (enrollment hijack).
-  els.enrollBtn.disabled = !['enroll', 'unlocked'].includes(next);
+  const canEnroll = ['enroll', 'unlocked'].includes(next);
+  els.enrollBtn.disabled = !canEnroll;
+  els.controls.hidden = !canEnroll; // no dead buttons: only shown when it can be pressed
+  els.signScreen.hidden = next !== 'signs';
+  els.signEntry.hidden = next === 'signs' || handFailed;
+  els.signBtn.disabled = ['loading', 'enrolling'].includes(next);
   els.enrollBtn.textContent = enrolled ? 'Re-enroll my face' : 'Enroll my face';
   els.deleteBtn.disabled = !enrolled || ['enrolling', 'loading'].includes(next);
 
   // Leaving the hand modes: forget hands and reset the slider
-  if (!['hand', 'unlocked'].includes(next)) {
+  if (!['hand', 'unlocked', 'signs'].includes(next)) {
     hands.clear();
     grab = null;
   }
@@ -287,7 +311,11 @@ function setMode(next) {
     recentMetrics = [];
   }
   if (next !== 'liveness') live = null;
-  if (prev === 'unlocked' && next !== 'unlocked') closeVault();
+  if (prev === 'unlocked' && next !== 'unlocked') {
+    closeVault();
+    els.vaultCard.open = false;
+  }
+  if (next === 'unlocked' && prev !== 'unlocked') els.vaultCard.open = true;
   if (next === 'unlocked' && vault.msPerGuess == null) benchmarkKdf();
   if (next === 'hand') setSlider(0, false);
   if (next === 'unlocked') fistSince = null;
@@ -297,10 +325,16 @@ function setMode(next) {
     enroll: 'No face enrolled yet. Look at the camera and press "Enroll my face".',
     face: 'Step 1: look at the camera to match your face.',
     liveness: 'Liveness check: follow the prompt on the camera.',
-    hand: 'Face verified. Next: pinch the handle and slide it to the right.',
-    unlocked: 'Unlocked. Hold a closed fist for 1 second to lock again.',
+    signs: 'Sign translator: hold one hand up and keep it still.',
+    hand: handFailed ? 'Face verified. Drag the handle to the right with your finger.' : 'Face verified. Next: pinch the handle and slide it to the right.',
+    unlocked: handFailed ? 'Unlocked. Press "Lock again" to lock.' : 'Unlocked. Hold a closed fist for 1 second to lock again.',
   };
   if (messages[next]) setStatus(messages[next]);
+  if (next === 'hand' || next === 'unlocked' || next === 'signs') ensureHandTracking();
+  if (next === 'signs') {
+    signReader.reset();
+    renderSign(null);
+  }
   renderVault();
 
   // The face loop runs in both 'face' and 'liveness'
@@ -359,25 +393,25 @@ async function startCamera() {
 // Models
 // ---------------------------------------------------------------------------
 
+/** Face models only: hand tracking is about 19 MB more, so it loads when it is first needed. */
 async function loadModels() {
-  const [faceapiModule, vision] = await Promise.all([
-    import(CONFIG.faceApiUrl),
-    import(CONFIG.visionUrl),
+  const faceapiModule = await import(CONFIG.faceApiUrl);
+
+  // face-api runs on TensorFlow.js; WebGL is much faster than the CPU backend
+  try { await faceapiModule.tf.setBackend('webgl'); } catch { /* falls back to the default */ }
+  await faceapiModule.tf.ready();
+
+  detectorOptions = new faceapiModule.TinyFaceDetectorOptions({ inputSize: CONFIG.faceInputSize, scoreThreshold: 0.5 });
+
+  await Promise.all([
+    faceapiModule.nets.tinyFaceDetector.loadFromUri(CONFIG.modelsUrl),
+    faceapiModule.nets.faceLandmark68Net.loadFromUri(CONFIG.modelsUrl),
+    faceapiModule.nets.faceRecognitionNet.loadFromUri(CONFIG.modelsUrl),
   ]);
   faceapi = faceapiModule;
 
-  // face-api runs on TensorFlow.js; WebGL is much faster than the CPU backend
-  try { await faceapi.tf.setBackend('webgl'); } catch { /* falls back to the default */ }
-  await faceapi.tf.ready();
-
-  detectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 });
-
-  await Promise.all([
-    faceapi.nets.tinyFaceDetector.loadFromUri(CONFIG.modelsUrl),
-    faceapi.nets.faceLandmark68Net.loadFromUri(CONFIG.modelsUrl),
-    faceapi.nets.faceRecognitionNet.loadFromUri(CONFIG.modelsUrl),
-    createHandLandmarker(vision),
-  ]);
+  setStatus('Preparing the face models. This can take a few seconds on a phone…');
+  await sleep(50); // let the message paint: the warm-up below blocks the page while it runs
   await warmUpFaceModels();
 }
 
@@ -390,7 +424,9 @@ async function warmUpFaceModels() {
   const blank = document.createElement('canvas');
   blank.width = blank.height = 160;
   await faceapi.detectSingleFace(blank, detectorOptions);
+  await sleep(0);
   await faceapi.detectFaceLandmarks(blank);
+  await sleep(0);
   await faceapi.computeFaceDescriptor(blank);
 }
 
@@ -399,7 +435,7 @@ async function createHandLandmarker({ FilesetResolver, HandLandmarker }) {
   const options = (delegate) => ({
     baseOptions: { modelAssetPath: CONFIG.handModel, delegate },
     runningMode: 'VIDEO',
-    numHands: 2,
+    numHands: CONFIG.numHands,
     minHandDetectionConfidence: 0.5,
     minHandPresenceConfidence: 0.5,
     minTrackingConfidence: 0.5,
@@ -409,6 +445,37 @@ async function createHandLandmarker({ FilesetResolver, HandLandmarker }) {
   } catch (err) {
     console.warn('GPU hand tracking unavailable, using CPU:', err);
     handLandmarker = await HandLandmarker.createFromOptions(fileset, options('CPU'));
+  }
+}
+
+/** Load hand tracking once, the first time a step needs it. If it fails, fall back to touch. */
+async function ensureHandTracking() {
+  if (handLandmarker || handLoading || handFailed) return;
+  handLoading = true;
+  if (mode === 'hand') setStatus('Face verified. Loading hand tracking (about 19 MB the first time)…');
+  if (mode === 'signs') setStatus('Loading hand tracking (about 19 MB the first time)…');
+  try {
+    await sleep(50); // let the message paint first
+    await createHandLandmarker(await import(CONFIG.visionUrl));
+    if (mode === 'hand') setStatus('Hand tracking ready. Pinch the handle and slide it to the right.');
+    if (mode === 'signs') setStatus('Ready. Hold one hand up and make a sign.');
+  } catch (err) {
+    console.error('Hand tracking could not start:', err);
+    handFailed = true;
+    els.track.classList.add('touch');
+    els.trackLabel.textContent = 'drag with your finger to unlock';
+    log.add('model_error', { level: 'warn', outcome: 'failure', message: 'Hand tracking is not available on this device: using touch for the slider' });
+    if (mode === 'hand') setStatus('Hand tracking is not available on this device. Drag the handle to the right with your finger.');
+    if (mode === 'unlocked') setStatus('Unlocked. Press "Lock again" to lock.');
+    if (mode === 'signs') {
+      setStatus('Hand tracking is not available on this device, so the sign translator cannot run here.');
+      els.signWord.textContent = 'Not available on this device';
+      els.signMeaning.textContent = 'This device could not start hand tracking.';
+    }
+    els.signEntry.hidden = true;
+    renderVault();
+  } finally {
+    handLoading = false;
   }
 }
 
@@ -447,7 +514,7 @@ async function enroll() {
     if (mode !== 'enrolling') return; // user left (e.g. camera stopped)
     if (face) {
       samples.push(face.descriptor);
-      lastFace = { box: face.box, points: face.points, at: performance.now(), color: '#3ee8ff', label: `sample ${samples.length}` };
+      lastFace = { box: face.box, points: face.points, at: performance.now(), color: '#d8b26e', label: `sample ${samples.length}` };
       updateEnrollProgress(samples.length);
     } else {
       setStatus('Enrolling: no face found. Look straight at the camera.');
@@ -506,6 +573,10 @@ function startFaceLoop() {
 
   const tick = async () => {
     if (id !== faceLoopId || !['face', 'liveness'].includes(mode)) return;
+    if (document.hidden) { // nobody is looking: do not burn the battery
+      setTimeout(tick, 500);
+      return;
+    }
     const t0 = performance.now();
     try {
       if (mode === 'face' && t0 < lockedUntil) {
@@ -521,7 +592,7 @@ function startFaceLoop() {
       console.error('Face detection failed:', err);
     }
     if (id === faceLoopId && ['face', 'liveness'].includes(mode)) {
-      const wait = mode === 'liveness' ? 0 : CONFIG.faceIntervalMs - (performance.now() - t0);
+      const wait = mode === 'liveness' ? CONFIG.livenessGapMs : CONFIG.faceIntervalMs - (performance.now() - t0);
       setTimeout(tick, Math.max(0, wait));
     }
   };
@@ -570,7 +641,7 @@ function handleFaceResult(face, now, metrics, distance) {
     box: face.box,
     points: face.points,
     at: now,
-    color: isMatch ? '#34f5a0' : '#ff4d6d',
+    color: isMatch ? '#86cfa3' : '#e27d73',
     label: distance.toFixed(2),
   };
 
@@ -704,7 +775,7 @@ function handleLivenessResult(face, now, metrics, distance) {
     return;
   }
   live.lastSeen = now;
-  lastFace = { box: face.box, points: face.points, at: now, color: '#3ee8ff', label: '' };
+  lastFace = { box: face.box, points: face.points, at: now, color: '#d8b26e', label: '' };
 
   // Continuous identity check: the same person must stay in front of the camera
   if (distance != null) {
@@ -870,7 +941,7 @@ function releaseHandle(byPinch) {
   if (byPinch && sliderPos >= CONFIG.unlockAt) {
     setSlider(1, false);
     log.add('unlock', settings.liveness
-      ? { level: 'success', outcome: 'success', message: 'Unlocked: face + liveness + gesture', fields: { liveness: true } }
+      ? { level: 'success', outcome: 'success', message: `Unlocked: face + liveness + ${handFailed ? 'touch (no hand tracking on this device)' : 'gesture'}`, fields: { liveness: true } }
       : { level: 'warn', outcome: 'success', message: 'Unlocked WITHOUT a liveness check: a photo could have done this', fields: { liveness: false } });
     setMode('unlocked');
   } else {
@@ -883,8 +954,37 @@ function releaseHandle(byPinch) {
   }
 }
 
+// Touch fallback: only used when hand tracking cannot run on this device
+let touchOffset = null;
+els.handle.addEventListener('pointerdown', (e) => {
+  if (!handFailed || mode !== 'hand') return;
+  e.preventDefault();
+  els.handle.setPointerCapture(e.pointerId);
+  const g = sliderGeometry();
+  const x = e.clientX - els.stage.getBoundingClientRect().left;
+  touchOffset = x - (g.startX + sliderPos * g.travel);
+  els.handle.classList.add('grabbed');
+  els.handle.classList.remove('spring');
+  els.fill.classList.remove('spring');
+});
+els.handle.addEventListener('pointermove', (e) => {
+  if (touchOffset == null) return;
+  const g = sliderGeometry();
+  const x = e.clientX - els.stage.getBoundingClientRect().left;
+  setSlider(clamp((x - touchOffset - g.startX) / g.travel, 0, 1), false);
+});
+for (const type of ['pointerup', 'pointercancel']) {
+  els.handle.addEventListener(type, () => {
+    if (touchOffset == null) return;
+    touchOffset = null;
+    releaseHandle(true);
+  });
+}
+
 /** Per-frame interaction logic for the slider (hand mode) and the fist (unlocked mode). */
 function updateInteraction(now) {
+  if (mode === 'signs') updateSigns();
+
   if (mode === 'hand') {
     const g = sliderGeometry();
     const handleX = g.startX + sliderPos * g.travel;
@@ -952,6 +1052,66 @@ function lock(method) {
 }
 
 // ---------------------------------------------------------------------------
+// Sign translator: make a hand sign, read its meaning on the small screen
+// ---------------------------------------------------------------------------
+
+function updateSigns() {
+  const now = performance.now();
+  let hand = null;
+  for (const h of hands.values()) if (!hand || h.lastSeen > hand.lastSeen) hand = h;
+  const sign = hand && now - hand.lastSeen < 150
+    ? classifySign(hand.landmarks, els.video.videoWidth, els.video.videoHeight)
+    : null;
+  renderSign(signReader.update(sign?.id ?? null, now));
+}
+
+function renderSign(sign) {
+  if (sign === shownSign) return;
+  shownSign = sign;
+  els.signEmoji.textContent = sign?.emoji ?? '✋';
+  els.signWord.textContent = sign?.word ?? 'Show a sign to the camera';
+  els.signAr.textContent = sign?.ar ?? '';
+  els.signMeaning.textContent = sign?.meaning ?? 'Try one of the signs listed below.';
+  els.signTag.textContent = sign?.tag ?? '';
+  els.signTag.hidden = !sign;
+  for (const li of els.signList.children) li.classList.toggle('on', li.dataset.sign === sign?.id);
+}
+
+async function startSigns() {
+  showError('');
+  els.signBtn.disabled = true;
+  signCloseCamera = !stream;
+  if (!stream) {
+    setStatus('Allow the camera to start the sign translator…');
+    try {
+      await startCamera();
+    } catch (err) {
+      console.error(err);
+      stream?.getTracks().forEach((t) => t.stop());
+      stream = null;
+      els.signBtn.disabled = false;
+      showError(cameraErrorMessage(err));
+      setStatus('Camera not started.');
+      return;
+    }
+  }
+  setMode('signs');
+  els.stage.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+/** Leaving always returns to a locked state: the translator never opens anything. */
+function stopSigns() {
+  if (signCloseCamera) {
+    stream?.getTracks().forEach((t) => t.stop());
+    stream = null;
+    setMode('landing');
+    setStatus(enrolled ? 'A face is already enrolled in this browser. Press "Start camera" to unlock.' : 'Waiting for you to start the camera.');
+  } else {
+    setMode(enrolled ? 'face' : 'enroll');
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Vault: encrypted notes behind the lock (crypto lives in vault.js)
 // ---------------------------------------------------------------------------
 
@@ -987,6 +1147,7 @@ function renderVault() {
   els.vaultSubmit.textContent = vault.record ? 'Decrypt' : 'Create vault';
   els.vaultSubmit.disabled = vault.busy;
   els.gesturePinBtn.disabled = vault.busy || Boolean(vault.pin);
+  els.gesturePinBtn.hidden = handFailed;
   els.vaultDelete.hidden = !(unlocked && vault.record);
   updateAttackerView();
 }
@@ -1223,7 +1384,7 @@ function drawFaceBox(w, h, now) {
   ctx.stroke();
   ctx.shadowBlur = 0;
   ctx.fillStyle = color;
-  ctx.font = '600 13px ui-monospace, Consolas, monospace';
+  ctx.font = '500 13px "Geist Mono", ui-monospace, Consolas, monospace';
   ctx.fillText(label, x + 4, Math.max(14, y - 8));
   ctx.restore();
 
@@ -1234,13 +1395,13 @@ function drawFaceBox(w, h, now) {
 function drawFaceLandmarks(w, h, vw, vh) {
   const pts = lastFace.points.map((p) => videoToBox(p.x / vw, p.y / vh, vw, vh, w, h, true));
   ctx.save();
-  ctx.fillStyle = 'rgba(216, 243, 255, 0.8)';
+  ctx.fillStyle = 'rgba(242, 236, 224, 0.8)';
   for (const p of pts) {
     ctx.beginPath();
     ctx.arc(p.x, p.y, 1.6, 0, Math.PI * 2);
     ctx.fill();
   }
-  ctx.strokeStyle = '#3ee8ff';
+  ctx.strokeStyle = '#d8b26e';
   ctx.lineWidth = 1.5;
   const outline = (idx) => {
     ctx.beginPath();
@@ -1252,12 +1413,12 @@ function drawFaceLandmarks(w, h, vw, vh) {
   outline(FACE68.EYE_B);
   outline([60, 61, 62, 63, 64, 65, 66, 67]); // inner lips
   // Jaw line and nose tip: what the head-turn measure uses
-  ctx.strokeStyle = 'rgba(180, 140, 255, 0.8)';
+  ctx.strokeStyle = 'rgba(227, 166, 108, 0.8)';
   ctx.beginPath();
   ctx.moveTo(pts[FACE68.JAW_START].x, pts[FACE68.JAW_START].y);
   ctx.lineTo(pts[FACE68.JAW_END].x, pts[FACE68.JAW_END].y);
   ctx.stroke();
-  ctx.fillStyle = '#b48cff';
+  ctx.fillStyle = '#e3a66c';
   ctx.beginPath();
   ctx.arc(pts[FACE68.NOSE_TIP].x, pts[FACE68.NOSE_TIP].y, 3.5, 0, Math.PI * 2);
   ctx.fill();
@@ -1273,13 +1434,13 @@ function drawHands(w, h, now) {
     const alpha = clamp(1 - (now - hand.lastSeen) / CONFIG.lostMs, 0, 1);
     const pts = hand.landmarks.map((p) => videoToBox(p.x, p.y, vw, vh, w, h, true));
     const isGrabbing = grab?.key === key;
-    const color = hand.fist && mode === 'unlocked' ? '#34f5a0' : hand.pinch.value ? '#b48cff' : '#3ee8ff';
+    const color = hand.fist && mode === 'unlocked' ? '#86cfa3' : hand.pinch.value ? '#e3a66c' : '#d8b26e';
 
     ctx.save();
     ctx.globalAlpha = alpha;
 
     // Skeleton
-    ctx.strokeStyle = 'rgba(216, 243, 255, 0.55)';
+    ctx.strokeStyle = 'rgba(242, 236, 224, 0.55)';
     ctx.lineWidth = 2;
     ctx.beginPath();
     for (const [i, j] of HAND_CONNECTIONS) {
@@ -1287,7 +1448,7 @@ function drawHands(w, h, now) {
       ctx.lineTo(pts[j].x, pts[j].y);
     }
     ctx.stroke();
-    ctx.fillStyle = 'rgba(62, 232, 255, 0.9)';
+    ctx.fillStyle = 'rgba(216, 178, 110, 0.9)';
     for (const p of pts) {
       ctx.beginPath();
       ctx.arc(p.x, p.y, 2.6, 0, Math.PI * 2);
@@ -1297,7 +1458,7 @@ function drawHands(w, h, now) {
     // Cursor: glowing ring when open, smaller solid dot while pinching
     const c = hand.cursor;
     ctx.shadowColor = color;
-    ctx.shadowBlur = 18;
+    ctx.shadowBlur = 0;
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
     ctx.beginPath();
@@ -1336,9 +1497,11 @@ function frame(now) {
   ctx.clearRect(0, 0, w, h);
   if (!stream) return;
 
-  const handsActive = mode === 'hand' || mode === 'unlocked';
-  if (handsActive && handLandmarker && els.video.readyState >= 2 && els.video.currentTime !== lastVideoTime) {
+  const handsActive = mode === 'hand' || mode === 'unlocked' || mode === 'signs';
+  if (handsActive && handLandmarker && els.video.readyState >= 2 && els.video.currentTime !== lastVideoTime
+    && now - lastHandAt >= CONFIG.handIntervalMs) {
     lastVideoTime = els.video.currentTime;
+    lastHandAt = now;
     try {
       updateHands(handLandmarker.detectForVideo(els.video, now), now);
       handCalls.push(now);
@@ -1377,15 +1540,22 @@ els.startBtn.addEventListener('click', async () => {
   showError('');
   els.startBtn.disabled = true;
   setMode('loading');
-  setStatus('Starting camera and loading models (about 15 MB the first time)…');
+  setStatus('Allow the camera, then wait while the face models load (about 8 MB the first time)…');
+  const slowHint = setTimeout(() => {
+    if (mode === 'loading') setStatus('Still loading. On a slow connection this can take a minute, please keep this tab open…');
+  }, 20000);
   const t0 = performance.now();
   try {
     // Ask for the camera and download the models at the same time
     // (tag camera errors so they get a camera message, not a "models" one)
     const camera = startCamera().catch((err) => { throw Object.assign(err, { isCamera: true }); });
-    const models = faceapi ? Promise.resolve() : loadModels();
-    await Promise.all([camera, models]);
+    modelsLoading ??= loadModels().catch((err) => {
+      modelsLoading = null; // so "Try again" really downloads them again
+      throw err;
+    });
+    await Promise.all([camera, modelsLoading]);
   } catch (err) {
+    clearTimeout(slowHint);
     console.error(err);
     stream?.getTracks().forEach((t) => t.stop());
     stream = null;
@@ -1402,6 +1572,8 @@ els.startBtn.addEventListener('click', async () => {
   log.add('camera_started', {
     message: `Camera on (${els.video.videoWidth}x${els.video.videoHeight}), models ready in ${((performance.now() - t0) / 1000).toFixed(1)} s. Video stays in this tab.`,
   });
+  clearTimeout(slowHint);
+  if (!LOW_POWER) ensureHandTracking(); // computers can afford to get it ready in advance
   els.startBtn.disabled = false;
   setMode(enrolled ? 'face' : 'enroll');
 });
@@ -1425,6 +1597,8 @@ els.deleteBtn.addEventListener('click', () => {
 });
 
 els.lockBtn.addEventListener('click', () => lock('button'));
+els.signBtn.addEventListener('click', startSigns);
+els.signStop.addEventListener('click', stopSigns);
 
 // Red team switch: liveness on/off
 els.livenessToggle.checked = settings.liveness;
@@ -1446,10 +1620,16 @@ function setXray(on) {
   els.xrayCard.hidden = !on;
   els.stage.classList.toggle('xray', on);
   if (on) {
+    els.xrayFold.open = true;
     xray.drawEmbedding(enrolled, null);
     xray.drawChart(distanceHistory, settings.threshold, performance.now());
   }
 }
+els.xrayFold.addEventListener('toggle', () => {
+  if (!els.xrayFold.open || !settings.xray) return;
+  xray.drawEmbedding();
+  xray.drawChart();
+});
 els.xrayToggle.addEventListener('change', () => {
   setXray(els.xrayToggle.checked);
   saveSettings();
@@ -1470,7 +1650,6 @@ els.thresholdInput.addEventListener('change', () => {
 });
 
 els.exportBtn.addEventListener('click', () => log.download());
-els.clearLogBtn.addEventListener('click', () => log.clear());
 
 // Vault
 els.gesturePinBtn.addEventListener('click', startPinEntry);
@@ -1486,7 +1665,6 @@ els.vaultSecret.addEventListener('keydown', (e) => {
 });
 els.vaultNotes.addEventListener('input', () => { vault.dirty = true; });
 els.vaultSave.addEventListener('click', saveVault);
-els.vaultLock.addEventListener('click', closeVault);
 els.vaultDelete.addEventListener('click', () => {
   // Two clicks within 3 s: deleting is permanent (there is no recovery without the secret anyway)
   const now = performance.now();
@@ -1525,6 +1703,12 @@ window.addEventListener('resize', () => {
 // Boot
 // ---------------------------------------------------------------------------
 
+for (const s of SIGNS) {
+  const li = document.createElement('li');
+  li.dataset.sign = s.id;
+  li.textContent = `${s.emoji} ${s.word}`;
+  els.signList.append(li);
+}
 enrolled = store.load();
 updateThresholdUI();
 setMode('landing');

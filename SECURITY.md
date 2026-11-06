@@ -31,5 +31,7 @@ a vulnerability. I aim to reply within 7 days.
 | @vladmandic/face-api | 1.7.15 |
 | @mediapipe/tasks-vision | 0.10.35 |
 
+Fonts in `vendor/fonts/` are Instrument Serif and Geist, under the SIL Open Font License.
+
 SHA-256 hashes of every vendored file are in `vendor/SHA256SUMS`. Verify them with
 `sha256sum -c vendor/SHA256SUMS` (run from the repository root).

@@ -19,8 +19,8 @@
  */
 
 import {
-  LM, HAND_CONNECTIONS, pinchRatio, isFistRaw, lerp, clamp, smoothingFactor,
-  Debounce, videoToBox, euclidean, averageVectors, countFingers, DigitEntry,
+  LM, HAND_CONNECTIONS, isFistRaw, lerp, clamp, smoothingFactor,
+  videoToBox, euclidean, averageVectors, countFingers, DigitEntry,
 } from './gestures.js';
 import { FACE68, faceMetrics, medianMetrics, CHALLENGES, pickChallenges } from './liveness.js';
 import { SIGNS, classifySign, SignReader } from './signs.js';
@@ -75,15 +75,12 @@ const CONFIG = {
   handIntervalMs: LOW_POWER ? 66 : 0, // at most ~15 hand detections per second on low-power devices
   numHands: LOW_POWER ? 1 : 2,
   cursorLerp: 0.3,       // low-pass filter for the fingertip cursor (per frame at 60 fps)
-  pinchOn: 0.35,         // pinch starts below 0.35 x hand size...
-  pinchOff: 0.5,         // ...and ends above 0.5 (hysteresis stops flicker)
-  pinchDebounceFrames: 3,
   fistAlpha: 0.25,       // smoothing of the per-frame fist test
   fistOn: 0.7,
   fistOff: 0.4,
   fistHoldMs: 1000,
   lostMs: 500,           // hand unseen this long = tracking lost
-  grabPadding: 30,       // px around the handle that still counts as "on it"
+  grabPadding: 40,       // px around the handle that still counts as "on it"
   unlockAt: 0.92,        // release past 92 % of the track to unlock
 
   historyMs: 25000,      // distance samples kept for the X-ray chart
@@ -326,7 +323,7 @@ function setMode(next) {
     face: 'Step 1: look at the camera to match your face.',
     liveness: 'Liveness check: follow the prompt on the camera.',
     signs: 'Sign translator: hold one hand up and keep it still.',
-    hand: handFailed ? 'Face verified. Drag the handle to the right with your finger.' : 'Face verified. Next: pinch the handle and slide it to the right.',
+    hand: handFailed ? 'Face verified. Drag the handle to the right with your finger.' : 'Face verified. Next: open your hand over the handle, then make a fist to grab it.',
     unlocked: handFailed ? 'Unlocked. Press "Lock again" to lock.' : 'Unlocked. Hold a closed fist for 1 second to lock again.',
   };
   if (messages[next]) setStatus(messages[next]);
@@ -457,7 +454,7 @@ async function ensureHandTracking() {
   try {
     await sleep(50); // let the message paint first
     await createHandLandmarker(await import(CONFIG.visionUrl));
-    if (mode === 'hand') setStatus('Hand tracking ready. Pinch the handle and slide it to the right.');
+    if (mode === 'hand') setStatus('Hand tracking ready. Open your hand over the handle, then make a fist to grab it.');
     if (mode === 'signs') setStatus('Ready. Hold one hand up and make a sign.');
   } catch (err) {
     console.error('Hand tracking could not start:', err);
@@ -866,10 +863,13 @@ function endLockout() {
 }
 
 // ---------------------------------------------------------------------------
-// Hands: tracking, pinch, fist, slider
+// Hands: tracking, fist, slider
 // ---------------------------------------------------------------------------
 
-/** Read one MediaPipe result into the `hands` map (cursor, pinch, fist per hand). */
+const PALM = [LM.WRIST, 5, LM.MIDDLE_MCP, 13, 17]; // wrist + the four finger knuckles
+const FINGERTIPS = [LM.THUMB_TIP, LM.INDEX_TIP, LM.MIDDLE_TIP, LM.RING_TIP, LM.PINKY_TIP];
+
+/** Read one MediaPipe result into the `hands` map (palm cursor, fingertips, fist per hand). */
 function updateHands(result, now) {
   const vw = els.video.videoWidth;
   const vh = els.video.videoHeight;
@@ -885,28 +885,28 @@ function updateHands(result, now) {
 
     let h = hands.get(key);
     if (!h) {
-      h = { cursor: null, pinch: new Debounce(CONFIG.pinchDebounceFrames), fistLevel: 0, fist: false, lastSeen: now };
+      h = { cursor: null, tips: [], fistLevel: 0, fist: false, fistStarted: false, lastSeen: now };
       hands.set(key, h);
     }
 
-    // Cursor = index fingertip, mapped into the mirrored stage, then low-pass filtered
-    const tip = videoToBox(lm[LM.INDEX_TIP].x, lm[LM.INDEX_TIP].y, vw, vh, boxW, boxH, true);
+    // Cursor = centre of the palm: it stays put when the fingers close into a fist.
+    // Mapped into the mirrored stage, then low-pass filtered.
+    const palmX = PALM.reduce((sum, i) => sum + lm[i].x, 0) / PALM.length;
+    const palmY = PALM.reduce((sum, i) => sum + lm[i].y, 0) / PALM.length;
+    const palm = videoToBox(palmX, palmY, vw, vh, boxW, boxH, true);
     if (!h.cursor) {
-      h.cursor = tip;
+      h.cursor = palm;
     } else {
       const t = smoothingFactor(CONFIG.cursorLerp, now - h.lastSeen);
-      h.cursor = { x: lerp(h.cursor.x, tip.x, t), y: lerp(h.cursor.y, tip.y, t) };
+      h.cursor = { x: lerp(h.cursor.x, palm.x, t), y: lerp(h.cursor.y, palm.y, t) };
     }
-
-    // Pinch (with hysteresis + 3-frame debounce)
-    const ratio = pinchRatio(lm, vw, vh);
-    const raw = h.pinch.value ? ratio < CONFIG.pinchOff : ratio < CONFIG.pinchOn;
-    const { value, changed } = h.pinch.update(raw);
-    h.pinchStarted = changed && value;
+    h.tips = FINGERTIPS.map((i) => videoToBox(lm[i].x, lm[i].y, vw, vh, boxW, boxH, true));
 
     // Fist (exponential smoothing of the per-frame test, with hysteresis)
     h.fistLevel = lerp(h.fistLevel, isFistRaw(lm, vw, vh) ? 1 : 0, CONFIG.fistAlpha);
+    const wasFist = h.fist;
     h.fist = h.fist ? h.fistLevel > CONFIG.fistOff : h.fistLevel > CONFIG.fistOn;
+    if (h.fist && !wasFist) h.fistStarted = true; // one-shot, consumed by updateInteraction
 
     h.landmarks = lm;
     h.lastSeen = now;
@@ -935,10 +935,10 @@ function setSlider(pos, spring) {
 }
 
 /** Let go of the handle: unlock if it reached the end, otherwise spring back. */
-function releaseHandle(byPinch) {
+function releaseHandle(opened) {
   grab = null;
   els.handle.classList.remove('grabbed');
-  if (byPinch && sliderPos >= CONFIG.unlockAt) {
+  if (opened && sliderPos >= CONFIG.unlockAt) {
     setSlider(1, false);
     log.add('unlock', settings.liveness
       ? { level: 'success', outcome: 'success', message: `Unlocked: face + liveness + ${handFailed ? 'touch (no hand tracking on this device)' : 'gesture'}`, fields: { liveness: true } }
@@ -947,9 +947,9 @@ function releaseHandle(byPinch) {
   } else {
     setSlider(0, true);
     if (mode === 'hand') {
-      setStatus(byPinch
-        ? 'Released too early. Pinch the handle and slide it all the way to the right.'
-        : 'Hand lost. Pinch the handle again.');
+      setStatus(opened
+        ? 'Released too early. Make a fist on the handle and slide it all the way to the right.'
+        : 'Hand lost. Make a fist on the handle again.');
     }
   }
 }
@@ -991,16 +991,17 @@ function updateInteraction(now) {
 
     if (!grab) {
       let hover = false;
-      // Whichever hand pinches on the handle first takes it
+      // Whichever hand closes into a fist on the handle first takes it
       for (const [key, h] of hands) {
-        const near = Math.hypot(h.cursor.x - handleX, h.cursor.y - g.centerY) < g.knob / 2 + CONFIG.grabPadding;
+        const reach = g.knob / 2 + CONFIG.grabPadding;
+        const near = [h.cursor, ...h.tips].some((p) => Math.hypot(p.x - handleX, p.y - g.centerY) < reach);
         hover ||= near;
-        if (near && h.pinchStarted) {
+        if (near && h.fistStarted) {
           grab = { key, offset: h.cursor.x - handleX };
           els.handle.classList.add('grabbed');
           els.handle.classList.remove('spring');
           els.fill.classList.remove('spring');
-          setStatus('Got it. Slide to the right and release at the end.');
+          setStatus('Got it. Slide to the right, then open your hand at the end.');
           break;
         }
       }
@@ -1009,7 +1010,7 @@ function updateInteraction(now) {
 
     if (grab) {
       const h = hands.get(grab.key);
-      if (!h.pinch.value) {
+      if (!h.fist) {
         releaseHandle(true);
       } else {
         setSlider(clamp((h.cursor.x - grab.offset - g.startX) / g.travel, 0, 1), false);
@@ -1029,8 +1030,8 @@ function updateInteraction(now) {
     }
   }
 
-  // Pinch-start events are one-shot: consume them
-  for (const h of hands.values()) h.pinchStarted = false;
+  // Fist-start events are one-shot: consume them
+  for (const h of hands.values()) h.fistStarted = false;
 }
 
 /** Drop hands that have not been seen for `lostMs`; release the slider if needed. */
@@ -1434,7 +1435,7 @@ function drawHands(w, h, now) {
     const alpha = clamp(1 - (now - hand.lastSeen) / CONFIG.lostMs, 0, 1);
     const pts = hand.landmarks.map((p) => videoToBox(p.x, p.y, vw, vh, w, h, true));
     const isGrabbing = grab?.key === key;
-    const color = hand.fist && mode === 'unlocked' ? '#86cfa3' : hand.pinch.value ? '#e3a66c' : '#d8b26e';
+    const color = hand.fist && mode === 'unlocked' ? '#86cfa3' : hand.fist ? '#e3a66c' : '#d8b26e';
 
     ctx.save();
     ctx.globalAlpha = alpha;
@@ -1455,23 +1456,24 @@ function drawHands(w, h, now) {
       ctx.fill();
     }
 
-    // Cursor: glowing ring when open, smaller solid dot while pinching
+    // Open hand: a ring on every fingertip. Fist: one solid dot on the palm.
     const c = hand.cursor;
-    ctx.shadowColor = color;
-    ctx.shadowBlur = 0;
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
-    ctx.beginPath();
-    if (hand.pinch.value) {
-      ctx.arc(c.x, c.y, isGrabbing ? 9 : 8, 0, Math.PI * 2);
+    if (hand.fist) {
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, isGrabbing ? 13 : 10, 0, Math.PI * 2);
       ctx.fill();
     } else {
-      ctx.lineWidth = 3;
-      ctx.arc(c.x, c.y, 14, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(c.x, c.y, 3, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.lineWidth = 2;
+      for (const tip of hand.tips) {
+        ctx.beginPath();
+        ctx.arc(tip.x, tip.y, 11, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(tip.x, tip.y, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     // Fist hold progress ring (unlocked mode)

@@ -4,6 +4,8 @@
 
 An educational, browser-only demo of a biometric "unlock". Your face is matched against a face you enrolled, a random liveness challenge checks you are not a photo, and then you pinch a slider handle with your hand in the air and drag it to the end.
 
+It also has a small **sign translator**: make one of 10 hand signs and a screen under the camera shows what it means. It reads still hand shapes, so it is not a full sign language.
+
 Around it is a small **security lab**. You play the red team (fool it with a photo, brute-force it), watch the blue-team defences react (liveness check, rate limiting, lockout), and read every attempt in a SOC-style event log that exports as ECS JSON.
 
 I built it as a cybersecurity student to learn browser-based computer vision and to show how biometric authentication is attacked and defended.
@@ -161,7 +163,7 @@ npx serve .                # http://localhost:3000
 python -m http.server 5500 # http://127.0.0.1:5500
 ```
 
-The first start downloads about 15 MB of models and libraries. After that the browser cache makes it fast.
+The first start downloads about 8 MB for the face step, then about 19 MB for hand tracking when that step begins. After that the browser cache makes it fast.
 
 ## Privacy
 

@@ -4,7 +4,7 @@
  *  1. Embedding strip: the 128 numbers of the enrolled descriptor, the live
  *     descriptor and their difference, one cell per number. Diverging colour
  *     (blue = negative, grey = 0, red = positive) for the values, one hue
- *     (grey -> cyan) for the size of the difference.
+ *     (grey -> gold) for the size of the difference.
  *  2. Distance timeline: the live match distance over the last 20 seconds
  *     against the threshold line. Below the line = match.
  *
@@ -28,7 +28,7 @@ export function createXray({ embedCanvas, embedTip, diffText, chartCanvas, chart
     ok: color('--ok'),
     ink: color('--text'),
     muted: color('--muted'),
-    grid: 'rgba(216, 243, 255, 0.10)',
+    grid: 'rgba(255, 243, 209, 0.10)',
     surface: color('--bg-2'),
   };
 
@@ -195,7 +195,7 @@ export function createXray({ embedCanvas, embedTip, diffText, chartCanvas, chart
       const t = now - (1 - (hoverX - PAD.l) / pw) * WINDOW_MS;
       const s = visible.reduce((a, b) => (Math.abs(b.t - t) < Math.abs(a.t - t) ? b : a));
       const x = xOf(s.t);
-      ctx.strokeStyle = 'rgba(216, 243, 255, 0.45)';
+      ctx.strokeStyle = 'rgba(255, 243, 209, 0.45)';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(x + 0.5, PAD.t);

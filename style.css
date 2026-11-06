@@ -550,25 +550,6 @@ main { display: flex; flex-direction: column; gap: 14px; }
 
 /* ---------- 7. Legend + disclaimer + footer ---------- */
 
-.legend {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px 18px;
-  margin: 0; padding: 0;
-  list-style: none;
-  font: 13px/1 var(--mono);
-  color: var(--muted);
-}
-.legend li { display: flex; align-items: center; gap: 8px; }
-.legend b { color: var(--text); font-weight: 600; }
-
-/* Tiny icons that match the cursor states drawn on the canvas */
-.g { display: inline-block; flex: none; width: 14px; height: 14px; border-radius: 50%; }
-.g-move  { border: 2px solid var(--accent); box-shadow: 0 0 8px var(--accent); }
-.g-pinch { width: 10px; height: 10px; background: var(--hand); box-shadow: 0 0 8px var(--hand); }
-.g-fist  { border-radius: 4px; background: var(--ok); box-shadow: 0 0 8px var(--ok); }
-
 .disclaimer {
   margin: 0;
   padding: 10px 14px;
@@ -593,10 +574,37 @@ main { display: flex; flex-direction: column; gap: 14px; }
 /* ---------- 8. Security lab: layout, cards, switches, X-ray ---------- */
 
 .lab { display: flex; flex-direction: column; gap: 14px; margin-top: 10px; }
-.lab-head h2 { margin: 0 0 4px; font: 700 20px/1.2 var(--mono); letter-spacing: 0.02em; color: var(--accent-soft); }
-.lab-head p { margin: 0; color: var(--muted); font-size: 14px; }
+.how h2, .lab h2 { margin: 0; font: 700 18px/1.2 var(--mono); letter-spacing: 0.02em; color: var(--accent-soft); }
 
-.lab-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 14px; }
+.how { display: flex; flex-direction: column; gap: 14px; margin-top: 10px; }
+.how-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 14px;
+  margin: 0; padding: 0;
+  list-style: none;
+  counter-reset: how;
+}
+.how-steps li { counter-increment: how; display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--muted); }
+.how-steps li::before {
+  content: counter(how);
+  display: grid;
+  place-items: center;
+  width: 26px; height: 26px;
+  margin-bottom: 4px;
+  border: 1px solid rgba(245, 197, 66, 0.55);
+  border-radius: 50%;
+  color: var(--accent);
+  font: 700 13px var(--mono);
+}
+.how-steps b { color: var(--text); font-weight: 600; }
+
+.fold { padding: 14px 16px; }
+.fold > summary { display: flex; flex-direction: column; gap: 3px; }
+.fold-sub { padding-left: 22px; color: var(--muted); font-size: 13px; }
+.fold-action { margin-bottom: 8px; }
+.xray[hidden], .controls[hidden] { display: none; }
+.xray { display: flex; flex-direction: column; gap: 14px; margin-top: 12px; }
 
 .card {
   padding: 16px;
@@ -776,19 +784,19 @@ main { display: flex; flex-direction: column; gap: 14px; }
 
 /* ---------- 10. Threat model ---------- */
 
-.threats summary { cursor: pointer; list-style: none; }
-.threats summary::-webkit-details-marker { display: none; }
-.threats summary h3 { flex-wrap: nowrap; margin: 0; }
-.threats summary h3::before { content: "+"; width: 14px; color: var(--accent); }
-.threats[open] summary h3::before { content: "−"; }
-.threats[open] summary { margin-bottom: 12px; }
+.fold > summary { cursor: pointer; list-style: none; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary h3 { flex-wrap: nowrap; margin: 0; }
+.fold > summary h3::before { content: "+"; width: 14px; color: var(--accent); }
+.fold[open] > summary h3::before { content: "−"; }
+.fold[open] > summary { margin-bottom: 12px; }
 .table-wrap { overflow-x: auto; }
-.threats table { width: 100%; min-width: 620px; border-collapse: collapse; font-size: 13px; }
-.threats th, .threats td { padding: 8px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
-.threats th { color: var(--muted); font: 600 11.5px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
-.threats td { color: #cdbf9c; }
-.threats td:first-child { color: var(--text); font-weight: 600; }
-.threats p { margin: 10px 0 0; }
+.fold table { width: 100%; min-width: 620px; border-collapse: collapse; font-size: 13px; }
+.fold th, .fold td { padding: 8px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+.fold th { color: var(--muted); font: 600 11.5px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+.fold td { color: #cdbf9c; }
+.fold td:first-child { color: var(--text); font-weight: 600; }
+.fold .table-wrap + p { margin: 10px 0 0; }
 
 /* ---------- 11. Vault + gesture PIN pad ---------- */
 
@@ -853,13 +861,61 @@ main { display: flex; flex-direction: column; gap: 14px; }
 
 /* ---------- 12. Responsive + reduced motion ---------- */
 
+/* Sign translator */
+.stage[data-state="signs"] .scanline { display: none; }
+.sign-entry { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.sign-entry[hidden], .sign-screen[hidden], .sign-tag[hidden] { display: none; }
+.sign-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid rgba(245, 197, 66, 0.45);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+}
+.sign-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.sign-head h2 { margin: 0; font: 700 15px/1.3 var(--mono); color: var(--accent-soft); }
+.sign-result { display: flex; align-items: center; gap: 14px; min-height: 88px; }
+.sign-emoji { flex: none; font-size: 56px; line-height: 1; }
+.sign-word { margin: 0; color: var(--text); font: 700 19px/1.3 var(--mono); }
+.sign-ar { color: var(--accent); font-family: var(--sans); }
+.sign-meaning { margin: 3px 0 6px; color: var(--muted); font-size: 14px; }
+.sign-tag { padding: 2px 8px; border: 1px solid var(--line); border-radius: 99px; color: var(--accent-soft); font: 11px var(--mono); }
+.sign-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.sign-list li { padding: 4px 9px; border: 1px solid var(--line); border-radius: 99px; color: var(--muted); font-size: 12.5px; }
+.sign-list li.on { border-color: var(--accent); background: rgba(245, 197, 66, 0.15); color: var(--text); }
+.sign-screen .small { margin: 0; }
+
+/* Touch fallback for the slider when hand tracking cannot run */
+.track.touch .handle { cursor: grab; touch-action: none; }
+
+/* Touch devices: blur and glow animations cost real frames while the camera models run */
+@media (pointer: coarse) {
+  .panel, .challenge, .track { -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .panel, .challenge { background-color: rgba(11, 9, 5, 0.9); }
+  .scanline { display: none; }
+  .track-label { animation: none; }
+}
+
 @media (max-width: 520px) {
+  /* The threat table becomes one short card per attack instead of a sideways scroll */
+  .fold table, .fold tbody, .fold tr, .fold td { display: block; width: 100%; min-width: 0; }
+  .fold thead { display: none; }
+  .fold tr { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .fold td { padding: 2px 0; border: 0; }
+  .fold td:nth-child(2)::before { content: "Without defences: "; color: var(--muted); }
+  .fold td:nth-child(3)::before { content: "In this demo: "; color: var(--muted); }
+  .fold td:nth-child(4)::before { content: "Real systems add: "; color: var(--muted); }
   .steps { width: 100%; justify-content: space-between; order: 2; } /* steps drop below the brand */
   .step { padding: 6px 9px 6px 6px; font-size: 11px; }
   .step + .step::before { display: none; }
   .frame { inset: 5%; }
   .slider { left: 5%; right: 5%; bottom: 5%; }
   .controls .btn { flex-basis: 100%; }  /* full-width, thumb-friendly buttons */
+  .how-steps { grid-template-columns: 1fr; gap: 12px; }
+  .how-steps li { display: grid; grid-template-columns: 26px 1fr; column-gap: 12px; }
+  .how-steps li::before { grid-row: span 2; margin: 0; }
   .card { padding: 14px; }
   .ev { grid-template-columns: auto 1fr; }
   .ev-action, .ev-msg { grid-column: 1 / -1; }

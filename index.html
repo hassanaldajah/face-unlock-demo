@@ -12,6 +12,7 @@
     WebAssembly; nothing here can send data to any other server.
   -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; style-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <script src="lang-init.js"></script>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="preload" href="vendor/fonts/instrument-serif-400.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="vendor/fonts/geist-variable.woff2" as="font" type="font/woff2" crossorigin>
@@ -25,7 +26,10 @@
         <svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><circle cx="12" cy="11" r="3.2"/><path d="M7.5 17.5a5 5 0 0 1 9 0"/></svg>
         <span>Face + Gesture Unlock</span>
       </div>
-      <a class="top-link" href="https://github.com/hassanaldajah/face-unlock-demo" target="_blank" rel="noopener">Source on GitHub</a>
+      <div class="top-actions">
+        <a class="top-link" href="https://github.com/hassanaldajah/face-unlock-demo" target="_blank" rel="noopener">Source on GitHub</a>
+        <button class="lang-btn" id="langBtn" type="button" lang="ar">العربية</button>
+      </div>
     </header>
 
     <main>
@@ -46,7 +50,7 @@
 
           <section class="stage" id="stage" data-state="landing">
         <video id="video" playsinline muted autoplay></video>
-        <canvas id="overlay" aria-hidden="true"></canvas>
+        <canvas id="overlay" dir="ltr" aria-hidden="true"></canvas>
 
         <!-- Scanner decoration: corner brackets + sweeping line -->
         <div class="frame" aria-hidden="true">
@@ -82,7 +86,7 @@
 
         <!-- Slide to unlock, driven by the hand cursor -->
         <div class="slider" id="slider" hidden>
-          <div class="track" id="track">
+          <div class="track" id="track" dir="ltr">
             <div class="fill" id="fill"></div>
             <span class="track-label" id="trackLabel">fist on the handle, then slide</span>
             <div class="handle" id="handle" aria-hidden="true">
@@ -195,7 +199,7 @@
         </div>
 
         <div id="vaultOpen" hidden>
-          <textarea id="vaultNotes" rows="4" maxlength="5000" placeholder="Write something only you should read…" aria-label="Secret notes"></textarea>
+          <textarea id="vaultNotes" dir="auto" rows="4" maxlength="5000" placeholder="Write something only you should read…" aria-label="Secret notes"></textarea>
           <div class="vault-row">
             <button class="btn primary small" id="vaultSave" type="button">Encrypt &amp; save</button>
           </div>
@@ -266,7 +270,7 @@
             <div class="embed">
               <div class="embed-labels" aria-hidden="true"><span>enrolled</span><span>live</span><span>difference</span></div>
               <div class="plot">
-                <canvas id="embedCanvas" class="embed-canvas" role="img" aria-label="Heat strip of the enrolled and live face descriptors and their difference"></canvas>
+                <canvas id="embedCanvas" class="embed-canvas" dir="ltr" role="img" aria-label="Heat strip of the enrolled and live face descriptors and their difference"></canvas>
                 <div class="tip" id="embedTip" hidden></div>
               </div>
             </div>
@@ -278,9 +282,9 @@
           </figure>
 
           <figure class="viz">
-            <figcaption><b>Match distance</b>, last 20 seconds. Below the dashed threshold line = match.</figcaption>
+            <figcaption><b>Match distance</b>, last 20 seconds. Inside the shaded zone = match.</figcaption>
             <div class="plot">
-              <canvas id="distChart" class="dist-canvas" role="img" aria-label="Line chart of the live match distance against the threshold"></canvas>
+              <canvas id="distChart" class="dist-canvas" dir="ltr" role="img" aria-label="Line chart of the live match distance against the threshold"></canvas>
               <div class="tip" id="chartTip" hidden></div>
             </div>
           </figure>

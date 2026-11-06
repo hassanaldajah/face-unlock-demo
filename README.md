@@ -2,7 +2,7 @@
 
 **Live demo:** https://face.al-hassan.dev
 
-An educational, browser-only demo of a biometric "unlock". Your face is matched against a face you enrolled, a random liveness challenge checks you are not a photo, and then you pinch a slider handle with your hand in the air and drag it to the end.
+An educational, browser-only demo of a biometric "unlock". Your face is matched against a face you enrolled, a random liveness challenge checks you are not a photo, and then you close your fist on a slider handle in the air and drag it to the end.
 
 It also has a small **sign translator**: make one of 10 hand signs and a screen under the camera shows what it means. It reads still hand shapes, so it is not a full sign language.
 
@@ -15,7 +15,7 @@ I built it as a cybersecurity student to learn browser-based computer vision and
 ## How it works
 
 ```
-Start camera -> Enroll -> 1. Face match -> 2. Liveness check -> 3. Pinch & slide -> Unlocked
+Start camera -> Enroll -> 1. Face match -> 2. Liveness check -> 3. Fist & slide -> Unlocked
                                             (random challenges)                     (fist = lock)
 ```
 
@@ -28,7 +28,7 @@ Start camera -> Enroll -> 1. Face match -> 2. Liveness check -> 3. Pinch & slide
    - mouth: inner-lip gap / mouth width.
 
    The same face has to stay in view the whole time (the descriptor is re-checked every few frames).
-5. **Slide to unlock.** MediaPipe tracks up to two hands (21 landmarks each). Your index fingertip becomes a cursor. Pinch over the handle to grab it, drag it along the track, and let go at the end. Let go early and it springs back.
+5. **Slide to unlock.** MediaPipe tracks up to two hands (21 landmarks each). An open hand shows a ring on every fingertip. Make a fist over the handle to grab it, drag it along the track, and open your hand at the end. Let go early and it springs back.
 6. **Unlocked.** Hold a closed fist for 1 second (or press **Lock again**) to lock and go back to step 1. **Delete my face data** clears `localStorage`.
 7. **Vault.** Behind the lock sits a vault of encrypted notes, opened with a 6-digit **gesture PIN** (hold up 1 to 5 fingers per digit) or a typed passphrase.
 
@@ -54,13 +54,12 @@ notes --AES-GCM, fresh random 96-bit IV on every save-->  ciphertext + authentic
 
 | Gesture | Action | How it is detected |
 |---|---|---|
-| **move** | move the cursor | index fingertip (landmark 8), mirrored to match the selfie view, smoothed with a low-pass filter (lerp 0.3 per frame) |
-| **pinch** | grab the handle | thumb tip (4) to index tip (8) distance < 0.35 x hand size (wrist to middle knuckle), released above 0.5, with a 3-frame debounce |
-| **fist** | lock again | all four fingertips closer to the wrist than their middle joints (PIP), smoothed over several frames, held for 1 s |
+| **move** | move the cursor | centre of the palm (wrist and knuckles), mirrored to match the selfie view, smoothed with a low-pass filter (lerp 0.3 per frame) |
+| **fist** | grab the handle, or hold for 1 s to lock again | all four fingertips closer to the wrist than their middle joints (PIP), smoothed over several frames |
 
-- Both hands work; whichever pinches on the handle first takes it.
+- Both hands work; whichever closes into a fist on the handle first takes it.
 - If the hand holding the handle is lost for more than 500 ms, the handle is released.
-- The cursor is a glowing ring; it turns into a smaller solid dot while you pinch.
+- An open hand shows a ring on each fingertip; a fist shows one solid dot on the palm.
 
 ## Security lab
 
@@ -140,7 +139,7 @@ Anything that runs fully in the browser can be changed by the person using the b
 index.html     page structure: stage, controls, security lab
 style.css      dark "scanner" UI, responsive down to phones
 app.js         camera, models, enrollment, matching, liveness, rate limiting, hands, drawing
-gestures.js    pure math: pinch, fist, finger counting, gesture-PIN entry, smoothing, coordinate mapping
+gestures.js    pure math: fist, finger counting, gesture-PIN entry, smoothing, coordinate mapping
 liveness.js    pure math: eye aspect ratio, head turn, mouth opening, random challenges
 vault.js       Web Crypto: PBKDF2 key derivation, AES-GCM encrypt/decrypt, strength estimate
 eventlog.js    SOC-style event log + ECS JSON export

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Face + Gesture Unlock</title>
   <meta name="description" content="Educational biometric security lab: face match, liveness check and hand-gesture unlock, with a red-team mode and a SOC-style event log. Runs 100% in your browser.">
-  <meta name="theme-color" content="#0b0905">
+  <meta name="theme-color" content="#0b0a08">
   <!--
     Content Security Policy: scripts only from this site
     (face-api + MediaPipe are self-hosted in vendor/). 'wasm-unsafe-eval' lets MediaPipe compile its
@@ -13,6 +13,8 @@
   -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; style-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="vendor/fonts/instrument-serif-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="vendor/fonts/geist-variable.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="style.css">
   <script type="module" src="app.js"></script>
 </head>
@@ -21,20 +23,28 @@
     <header class="top">
       <div class="brand">
         <svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><circle cx="12" cy="11" r="3.2"/><path d="M7.5 17.5a5 5 0 0 1 9 0"/></svg>
-        <span>Face&nbsp;+&nbsp;Gesture&nbsp;Unlock</span>
+        <span>Face + Gesture Unlock</span>
       </div>
-      <!-- Step indicator: Face -> Live -> Hand -> Unlocked -->
-      <ol class="steps" aria-label="Progress">
+      <a class="top-link" href="https://github.com/hassanaldajah/face-unlock-demo" target="_blank" rel="noopener">Source on GitHub</a>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">A biometric security lab in your browser</p>
+          <h1>Unlock with your face. <em>Nothing leaves this page.</em></h1>
+          <p class="lede">Face match, a liveness check and a hand gesture, all running on your device. Then try to break it and watch the defences respond.</p>
+        </div>
+
+        <div class="console">
+          <ol class="steps" aria-label="Progress">
         <li class="step" data-step="face"><span class="dot"></span>Face</li>
         <li class="step" data-step="liveness"><span class="dot"></span>Live</li>
         <li class="step" data-step="hand"><span class="dot"></span>Hand</li>
         <li class="step" data-step="unlocked"><span class="dot">✓</span>Unlocked</li>
       </ol>
-    </header>
 
-    <main>
-      <!-- The stage: mirrored camera video + one canvas overlay for drawings -->
-      <section class="stage" id="stage" data-state="landing">
+          <section class="stage" id="stage" data-state="landing">
         <video id="video" playsinline muted autoplay></video>
         <canvas id="overlay" aria-hidden="true"></canvas>
 
@@ -47,8 +57,8 @@
 
         <!-- Landing / consent screen (camera starts only after the click) -->
         <div class="panel landing" id="landing">
-          <h1>Face + Gesture Unlock</h1>
-          <p class="consent">This demo uses your camera locally in your browser. No data is uploaded. Face data is stored only in your browser's localStorage and you can delete it anytime.</p>
+          <h2 class="landing-title">The camera is off</h2>
+          <p class="consent">Video stays on this device. Your face data is saved only in this browser, and you can delete it anytime.</p>
           <button class="btn primary" id="startBtn" type="button">Start camera</button>
           <p class="error" id="errorMsg" role="alert" hidden></p>
         </div>
@@ -107,8 +117,7 @@
         </div>
       </section>
 
-      <!-- Live status: what the app is doing + face distance meter -->
-      <section class="status" aria-live="polite">
+          <section class="status" aria-live="polite">
         <p class="status-text" id="statusText">Waiting for you to start the camera.</p>
         <div class="meter" id="meter" hidden>
           <div class="meter-bar"><span id="meterFill"></span><i class="meter-threshold" id="meterThreshold" title="match threshold"></i></div>
@@ -120,12 +129,11 @@
         </div>
       </section>
 
-      <section class="controls" id="controls" hidden>
+          <section class="controls" id="controls" hidden>
         <button class="btn primary" id="enrollBtn" type="button" disabled>Enroll my face</button>
       </section>
 
-      <!-- Sign translator: the small screen under the camera -->
-      <section class="sign-screen" id="signScreen" aria-labelledby="signTitle" hidden>
+          <section class="sign-screen" id="signScreen" aria-labelledby="signTitle" hidden>
         <div class="sign-head">
           <h2 id="signTitle">Sign translator</h2>
           <button class="btn small" id="signStop" type="button">Close</button>
@@ -142,9 +150,17 @@
         <p class="muted small">It reads 10 still hand shapes. It is not a full sign language: real signing uses movement, both hands and the face.</p>
       </section>
 
-      <section class="sign-entry" id="signEntry">
-        <button class="btn" id="signBtn" type="button">🤟 Try the sign translator</button>
-        <span class="muted small">Make a hand sign and see what it means. No enrollment needed.</span>
+          <section class="sign-entry" id="signEntry">
+            <p><b>Sign translator</b>Make a hand sign and read what it means. No enrollment needed.</p>
+            <button class="btn small" id="signBtn" type="button">Try it</button>
+          </section>
+        </div>
+
+        <dl class="facts">
+          <div><dt>No uploads</dt><dd>Video and face data stay on this device.</dd></div>
+          <div><dt>No account</dt><dd>Nothing to sign up for. Delete your data anytime.</dd></div>
+          <div><dt>Open source</dt><dd>Every line is on GitHub to read and check.</dd></div>
+        </dl>
       </section>
 
       <section class="how" aria-labelledby="howTitle">
@@ -158,12 +174,15 @@
         <p class="disclaimer"><b>Educational demo.</b> Camera-based face matching can be fooled by photos and is not suitable for real security.</p>
       </section>
 
-      <!-- ================= Security lab: one section open at a time ================= -->
       <section class="lab" aria-labelledby="labTitle">
-        <h2 id="labTitle">Explore the security lab</h2>
-
+        <div class="lab-intro">
+          <h2 id="labTitle">Security lab</h2>
+          <p>Attack it, watch the defences react, and read the log. Every section works on this page.</p>
+        </div>
+        <div class="lab-list">
         <details class="card fold vault" id="vaultCard" name="lab">
           <summary><h3>Encrypted vault</h3><span class="fold-sub">Private notes that only open after you unlock.</span></summary>
+          <div class="fold-body">
           <p class="vault-status" id="vaultStatus" aria-live="polite">Locked.</p>
         <div id="vaultSecretForm" hidden>
           <div class="vault-row">
@@ -188,12 +207,12 @@
           <pre id="vaultRaw">(nothing stored yet)</pre>
           <button class="btn small" id="tamperBtn" type="button" disabled>Tamper test: flip 1 bit and try to decrypt</button>
           <p class="muted small" id="tamperResult"></p>
-        </details>
-        <p class="muted small">Your secret goes through PBKDF2-SHA256 (600,000 rounds, random salt) to make an AES-256-GCM key. Only the salt, a random IV and the ciphertext are stored. Even if someone bypasses the face check by editing the code, they get this ciphertext, not your notes.</p>
+          </div>
         </details>
 
         <details class="card fold" name="lab">
           <summary><h3>Try to fool it</h3><span class="fold-sub">Red team: three attacks you can run yourself.</span></summary>
+          <div class="fold-body">
 
             <ol class="attacks">
               <li><b>Photo attack.</b> Turn the switch below off, then hold a photo of yourself (on your phone) up to the camera. Face matching alone lets it in.</li>
@@ -205,10 +224,12 @@
               <span class="switch-ui" aria-hidden="true"></span>
               <span><b>Liveness check</b> <span class="muted">(anti-spoofing)</span></span>
             </label>
+          </div>
         </details>
 
         <details class="card fold" name="lab">
           <summary><h3>How it defends itself</h3><span class="fold-sub">Blue team: the protections in place.</span></summary>
+          <div class="fold-body">
 
             <ul class="defences">
               <li><b>Random liveness challenge.</b> 2 of: blink, turn left, turn right, open mouth. The idea behind presentation attack detection (ISO/IEC 30107).</li>
@@ -219,10 +240,12 @@
               <li><b>Audit trail.</b> Every attempt is logged below and can be exported as ECS-style JSON for a SIEM.</li>
             </ul>
             <p class="fails">Failed attempts in the last 60 s: <b id="failCount">0</b> / 5</p>
+          </div>
         </details>
 
         <details class="card fold" id="xrayFold" name="lab">
           <summary><h3>X-ray view</h3><span class="fold-sub">See what the face matcher sees.</span></summary>
+          <div class="fold-body">
           <label class="switch xray-switch">
           <input type="checkbox" id="xrayToggle">
           <span class="switch-ui" aria-hidden="true"></span>
@@ -268,18 +291,22 @@
             <p class="muted small">Lower = stricter: strangers are rejected, but so are you in bad light (false rejects). Higher = looser: you always pass, and so might a lookalike (false accepts). Every biometric system picks a point on this trade-off.</p>
           </div>
         </div>
+          </div>
         </details>
 
         <details class="card fold" name="lab">
           <summary><h3>Security events</h3><span class="fold-sub">A live log of every attempt.</span></summary>
+          <div class="fold-body">
           <button class="btn small fold-action" id="exportBtn" type="button">Export JSON</button>
           <p class="muted small">Kept in memory only (gone when you close the tab). No images or face data, just events and distances.</p>
           <p class="empty" id="logEmpty">No events yet.</p>
           <ol class="log-list" id="logList"></ol>
+          </div>
         </details>
 
         <details class="card fold" name="lab">
           <summary><h3>Threat model</h3><span class="fold-sub">How could someone get in?</span></summary>
+          <div class="fold-body">
           <div class="table-wrap">
             <table>
               <thead><tr><th>Attack</th><th>Without defences</th><th>In this demo</th><th>What real systems add</th></tr></thead>
@@ -296,13 +323,17 @@
             </table>
           </div>
           <p class="muted small">The last three rows are the honest part: a browser demo can show the ideas, but anything that runs fully on the client can be changed by the client.</p>
+          </div>
         </details>
 
         <details class="card fold" name="lab">
           <summary><h3>Your data</h3><span class="fold-sub">What is stored, and how to delete it.</span></summary>
+          <div class="fold-body">
           <p class="muted small">Your face template is 128 numbers saved only in this browser. No images, nothing uploaded.</p>
           <button class="btn danger small" id="deleteBtn" type="button" disabled>Delete my face data</button>
+          </div>
         </details>
+        </div>
       </section>
     </main>
 

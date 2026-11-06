@@ -514,7 +514,7 @@ async function enroll() {
     if (mode !== 'enrolling') return; // user left (e.g. camera stopped)
     if (face) {
       samples.push(face.descriptor);
-      lastFace = { box: face.box, points: face.points, at: performance.now(), color: '#f5c542', label: `sample ${samples.length}` };
+      lastFace = { box: face.box, points: face.points, at: performance.now(), color: '#d8b26e', label: `sample ${samples.length}` };
       updateEnrollProgress(samples.length);
     } else {
       setStatus('Enrolling: no face found. Look straight at the camera.');
@@ -641,7 +641,7 @@ function handleFaceResult(face, now, metrics, distance) {
     box: face.box,
     points: face.points,
     at: now,
-    color: isMatch ? '#34f5a0' : '#ff4d6d',
+    color: isMatch ? '#86cfa3' : '#e27d73',
     label: distance.toFixed(2),
   };
 
@@ -775,7 +775,7 @@ function handleLivenessResult(face, now, metrics, distance) {
     return;
   }
   live.lastSeen = now;
-  lastFace = { box: face.box, points: face.points, at: now, color: '#f5c542', label: '' };
+  lastFace = { box: face.box, points: face.points, at: now, color: '#d8b26e', label: '' };
 
   // Continuous identity check: the same person must stay in front of the camera
   if (distance != null) {
@@ -1384,7 +1384,7 @@ function drawFaceBox(w, h, now) {
   ctx.stroke();
   ctx.shadowBlur = 0;
   ctx.fillStyle = color;
-  ctx.font = '600 13px ui-monospace, Consolas, monospace';
+  ctx.font = '500 13px "Geist Mono", ui-monospace, Consolas, monospace';
   ctx.fillText(label, x + 4, Math.max(14, y - 8));
   ctx.restore();
 
@@ -1395,13 +1395,13 @@ function drawFaceBox(w, h, now) {
 function drawFaceLandmarks(w, h, vw, vh) {
   const pts = lastFace.points.map((p) => videoToBox(p.x / vw, p.y / vh, vw, vh, w, h, true));
   ctx.save();
-  ctx.fillStyle = 'rgba(255, 243, 209, 0.8)';
+  ctx.fillStyle = 'rgba(242, 236, 224, 0.8)';
   for (const p of pts) {
     ctx.beginPath();
     ctx.arc(p.x, p.y, 1.6, 0, Math.PI * 2);
     ctx.fill();
   }
-  ctx.strokeStyle = '#f5c542';
+  ctx.strokeStyle = '#d8b26e';
   ctx.lineWidth = 1.5;
   const outline = (idx) => {
     ctx.beginPath();
@@ -1413,12 +1413,12 @@ function drawFaceLandmarks(w, h, vw, vh) {
   outline(FACE68.EYE_B);
   outline([60, 61, 62, 63, 64, 65, 66, 67]); // inner lips
   // Jaw line and nose tip: what the head-turn measure uses
-  ctx.strokeStyle = 'rgba(255, 169, 77, 0.8)';
+  ctx.strokeStyle = 'rgba(227, 166, 108, 0.8)';
   ctx.beginPath();
   ctx.moveTo(pts[FACE68.JAW_START].x, pts[FACE68.JAW_START].y);
   ctx.lineTo(pts[FACE68.JAW_END].x, pts[FACE68.JAW_END].y);
   ctx.stroke();
-  ctx.fillStyle = '#ffa94d';
+  ctx.fillStyle = '#e3a66c';
   ctx.beginPath();
   ctx.arc(pts[FACE68.NOSE_TIP].x, pts[FACE68.NOSE_TIP].y, 3.5, 0, Math.PI * 2);
   ctx.fill();
@@ -1434,13 +1434,13 @@ function drawHands(w, h, now) {
     const alpha = clamp(1 - (now - hand.lastSeen) / CONFIG.lostMs, 0, 1);
     const pts = hand.landmarks.map((p) => videoToBox(p.x, p.y, vw, vh, w, h, true));
     const isGrabbing = grab?.key === key;
-    const color = hand.fist && mode === 'unlocked' ? '#34f5a0' : hand.pinch.value ? '#ffa94d' : '#f5c542';
+    const color = hand.fist && mode === 'unlocked' ? '#86cfa3' : hand.pinch.value ? '#e3a66c' : '#d8b26e';
 
     ctx.save();
     ctx.globalAlpha = alpha;
 
     // Skeleton
-    ctx.strokeStyle = 'rgba(255, 243, 209, 0.55)';
+    ctx.strokeStyle = 'rgba(242, 236, 224, 0.55)';
     ctx.lineWidth = 2;
     ctx.beginPath();
     for (const [i, j] of HAND_CONNECTIONS) {
@@ -1448,7 +1448,7 @@ function drawHands(w, h, now) {
       ctx.lineTo(pts[j].x, pts[j].y);
     }
     ctx.stroke();
-    ctx.fillStyle = 'rgba(245, 197, 66, 0.9)';
+    ctx.fillStyle = 'rgba(216, 178, 110, 0.9)';
     for (const p of pts) {
       ctx.beginPath();
       ctx.arc(p.x, p.y, 2.6, 0, Math.PI * 2);
@@ -1458,7 +1458,7 @@ function drawHands(w, h, now) {
     // Cursor: glowing ring when open, smaller solid dot while pinching
     const c = hand.cursor;
     ctx.shadowColor = color;
-    ctx.shadowBlur = LOW_POWER ? 0 : 18; // canvas blur is expensive on phones
+    ctx.shadowBlur = 0;
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
     ctx.beginPath();

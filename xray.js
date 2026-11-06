@@ -28,7 +28,7 @@ export function createXray({ embedCanvas, embedTip, diffText, chartCanvas, chart
     ok: color('--ok'),
     ink: color('--text'),
     muted: color('--muted'),
-    grid: 'rgba(255, 243, 209, 0.10)',
+    grid: 'rgba(242, 236, 224, 0.10)',
     surface: color('--bg-2'),
   };
 
@@ -132,7 +132,7 @@ export function createXray({ embedCanvas, embedTip, diffText, chartCanvas, chart
     ctx.textBaseline = 'middle';
 
     // Match zone: everything above the threshold line (distance < threshold)
-    ctx.fillStyle = 'rgba(52, 245, 160, 0.07)';
+    ctx.fillStyle = 'rgba(134, 207, 163, 0.07)';
     ctx.fillRect(PAD.l, PAD.t, pw, yOf(threshold) - PAD.t);
     ctx.fillStyle = C.muted;
     ctx.textAlign = 'left';
@@ -195,7 +195,7 @@ export function createXray({ embedCanvas, embedTip, diffText, chartCanvas, chart
       const t = now - (1 - (hoverX - PAD.l) / pw) * WINDOW_MS;
       const s = visible.reduce((a, b) => (Math.abs(b.t - t) < Math.abs(a.t - t) ? b : a));
       const x = xOf(s.t);
-      ctx.strokeStyle = 'rgba(255, 243, 209, 0.45)';
+      ctx.strokeStyle = 'rgba(242, 236, 224, 0.45)';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(x + 0.5, PAD.t);

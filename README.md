@@ -6,6 +6,8 @@ An educational, browser-only demo of a biometric "unlock". Your face is matched 
 
 It also has a small **sign translator**: make one of 10 hand signs and a screen under the camera shows what it means. It reads still hand shapes, so it is not a full sign language.
 
+The whole page is available in **English and Arabic**: use the button in the header, or add `?lang=ar` to the link.
+
 Around it is a small **security lab**. You play the red team (fool it with a photo, brute-force it), watch the blue-team defences react (liveness check, rate limiting, lockout), and read every attempt in a SOC-style event log that exports as ECS JSON.
 
 I built it as a cybersecurity student to learn browser-based computer vision and to show how biometric authentication is attacked and defended.
@@ -139,6 +141,7 @@ Anything that runs fully in the browser can be changed by the person using the b
 index.html     page structure: stage, controls, security lab
 style.css      dark "scanner" UI, responsive down to phones
 app.js         camera, models, enrollment, matching, liveness, rate limiting, hands, drawing
+i18n.js        English and Arabic: language switch; i18n-ar.js holds the Arabic text; lang-init.js picks the language before the page paints
 gestures.js    pure math: fist, finger counting, gesture-PIN entry, smoothing, coordinate mapping
 liveness.js    pure math: eye aspect ratio, head turn, mouth opening, random challenges
 vault.js       Web Crypto: PBKDF2 key derivation, AES-GCM encrypt/decrypt, strength estimate

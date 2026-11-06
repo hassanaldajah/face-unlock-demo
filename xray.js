@@ -12,6 +12,8 @@
  * CSS custom properties so the palette lives in style.css.
  */
 
+import { t as tr, say } from './i18n.js';
+
 const WINDOW_MS = 20000;
 const VALUE_RANGE = 0.2;   // descriptor values are roughly -0.25..0.25
 const DIFF_RANGE = 0.15;
@@ -79,9 +81,9 @@ export function createXray({ embedCanvas, embedTip, diffText, chartCanvas, chart
         .sort((a, b) => b.d - a.d)
         .slice(0, 3)
         .map(({ i, d }) => `#${i} (${d.toFixed(3)})`);
-      diffText.textContent = `Largest differences: ${top.join(', ')}`;
+      say(diffText, 'Largest differences: {list}', { list: top.join(', ') });
     } else {
-      diffText.textContent = 'Waiting for a live face…';
+      say(diffText, 'Waiting for a live face…');
     }
   }
 
@@ -104,10 +106,10 @@ export function createXray({ embedCanvas, embedTip, diffText, chartCanvas, chart
     }
     const { enrolled, live } = embed;
     showTip(embedTip, e.clientX - rect.left, [
-      [enrolled[i].toFixed(3), 'enrolled'],
-      [live ? live[i].toFixed(3) : '-', 'live'],
-      [live ? Math.abs(live[i] - enrolled[i]).toFixed(3) : '-', 'difference'],
-    ], `dimension ${i}`, rect.width);
+      [enrolled[i].toFixed(3), tr('enrolled')],
+      [live ? live[i].toFixed(3) : '-', tr('live')],
+      [live ? Math.abs(live[i] - enrolled[i]).toFixed(3) : '-', tr('difference')],
+    ], tr('dimension {i}', { i }), rect.width);
   });
   embedCanvas.addEventListener('pointerleave', () => {
     hoverCell = -1;
@@ -128,7 +130,7 @@ export function createXray({ embedCanvas, embedTip, diffText, chartCanvas, chart
     const xOf = (t) => PAD.l + (1 - (now - t) / WINDOW_MS) * pw;
     const yOf = (d) => PAD.t + Math.min(1, d) * ph;   // 0 at the top = closest match
 
-    ctx.font = '11px ui-monospace, Consolas, monospace';
+    ctx.font = '11px "Geist Mono", "IBM Plex Sans Arabic", ui-monospace, Consolas, monospace';
     ctx.textBaseline = 'middle';
 
     // Match zone: everything above the threshold line (distance < threshold)
@@ -136,7 +138,7 @@ export function createXray({ embedCanvas, embedTip, diffText, chartCanvas, chart
     ctx.fillRect(PAD.l, PAD.t, pw, yOf(threshold) - PAD.t);
     ctx.fillStyle = C.muted;
     ctx.textAlign = 'left';
-    ctx.fillText('match zone', PAD.l + 6, PAD.t + 9);
+    ctx.fillText(tr('match zone'), PAD.l + 6, PAD.t + 9);
 
     // Recessive grid + y labels
     ctx.strokeStyle = C.grid;
@@ -151,9 +153,9 @@ export function createXray({ embedCanvas, embedTip, diffText, chartCanvas, chart
       ctx.fillText(d.toFixed(d % 0.5 ? 2 : 1), PAD.l - 6, yOf(d));
     }
     ctx.textAlign = 'left';
-    ctx.fillText('-20 s', PAD.l, h - 8);
+    ctx.fillText(tr('-20 s'), PAD.l, h - 8);
     ctx.textAlign = 'right';
-    ctx.fillText('now', PAD.l + pw, h - 8);
+    ctx.fillText(tr('now'), PAD.l + pw, h - 8);
 
     // Threshold line, labelled at the right edge
     ctx.strokeStyle = C.ok;
@@ -203,9 +205,9 @@ export function createXray({ embedCanvas, embedTip, diffText, chartCanvas, chart
       ctx.stroke();
       if (s.d != null) dot(ctx, x, yOf(s.d), C.line);
       showTip(chartTip, x, [
-        [s.d == null ? 'no face' : s.d.toFixed(3), 'distance'],
-        [s.d == null ? '-' : s.d < threshold ? 'match' : 'no match', 'result'],
-        [`${((now - s.t) / 1000).toFixed(1)} s ago`, 'time'],
+        [s.d == null ? tr('no face') : s.d.toFixed(3), tr('distance')],
+        [s.d == null ? '-' : tr(s.d < threshold ? 'match' : 'no match'), tr('result')],
+        [tr('{s} s ago', { s: ((now - s.t) / 1000).toFixed(1) }), tr('time')],
       ], null, chartCanvas.clientWidth);
     }
 

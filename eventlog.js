@@ -11,6 +11,8 @@
  * the match distance.
  */
 
+import { t, en, asMessage } from './i18n.js';
+
 /** Level -> label + icon. A colour is never the only signal. */
 const LEVELS = {
   info:    { label: 'INFO',  icon: 'i' },
@@ -38,7 +40,9 @@ export class EventLog {
    * @param {object} opts     { level, outcome, message, fields }
    */
   add(action, { level = 'info', outcome, message = '', fields = {} } = {}) {
-    const event = { time: new Date(), action, level, outcome, message, fields };
+    const { text, vars } = asMessage(message);
+    // `message` stays in English so an exported log reads the same everywhere; the screen uses `text` + `vars`
+    const event = { time: new Date(), action, level, outcome, message: en(text, vars), text, vars, fields };
     this.events.push(event);
     if (this.events.length > this.max) {
       this.events.shift();
@@ -63,7 +67,7 @@ export class EventLog {
     const iconEl = document.createElement('i');
     iconEl.setAttribute('aria-hidden', 'true');
     iconEl.textContent = icon;
-    badge.append(iconEl, label);
+    badge.append(iconEl, t(label));
 
     const action = document.createElement('code');
     action.className = 'ev-action';
@@ -71,11 +75,17 @@ export class EventLog {
 
     const msg = document.createElement('span');
     msg.className = 'ev-msg';
-    msg.textContent = event.message;
+    msg.textContent = t(event.text, event.vars);
 
     li.append(time, badge, action, msg);
     this.list.prepend(li);
     this.empty.hidden = true;
+  }
+
+  /** Rebuild every row, e.g. after the language changes. */
+  rerender() {
+    this.list.replaceChildren();
+    this.events.forEach((event) => this.render(event));
   }
 
   clear() {

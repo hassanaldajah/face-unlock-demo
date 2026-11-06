@@ -17,6 +17,11 @@
 @font-face { font-family: "Geist"; src: url("vendor/fonts/geist-variable.woff2") format("woff2"); font-weight: 100 900; font-style: normal; font-display: swap; }
 @font-face { font-family: "Geist Mono"; src: url("vendor/fonts/geist-mono-variable.woff2") format("woff2"); font-weight: 100 900; font-style: normal; font-display: swap; }
 
+/* Arabic fonts: unicode-range means they only download when Arabic text is on screen */
+@font-face { font-family: "Noto Naskh Arabic"; src: url("vendor/fonts/noto-naskh-arabic-variable.woff2") format("woff2"); font-weight: 400 700; font-style: normal; font-display: swap; unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC; }
+@font-face { font-family: "IBM Plex Sans Arabic"; src: url("vendor/fonts/ibm-plex-sans-arabic-400.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC; }
+@font-face { font-family: "IBM Plex Sans Arabic"; src: url("vendor/fonts/ibm-plex-sans-arabic-500.woff2") format("woff2"); font-weight: 500; font-style: normal; font-display: swap; unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC; }
+
 :root {
   /* Surfaces: warm near-black, one step of elevation */
   --bg: #0b0a08;
@@ -41,9 +46,9 @@
   --state: var(--accent);
 
   /* Type */
-  --serif: "Instrument Serif", "Iowan Old Style", Georgia, serif;
-  --sans: "Geist", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-  --mono: "Geist Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  --serif: "Instrument Serif", "Noto Naskh Arabic", "Iowan Old Style", Georgia, serif;
+  --sans: "Geist", "IBM Plex Sans Arabic", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --mono: "Geist Mono", "IBM Plex Sans Arabic", ui-monospace, "SFMono-Regular", Consolas, monospace;
 
   /* Rhythm */
   --radius: 14px;
@@ -107,6 +112,23 @@ h1, h2 { margin: 0; color: var(--text); font-family: var(--serif); font-weight: 
 
 .brand { display: flex; align-items: center; gap: 10px; color: var(--text); font-size: 14.5px; font-weight: 500; letter-spacing: -0.005em; }
 .brand-icon { flex: none; width: 22px; height: 22px; fill: none; stroke: var(--accent); stroke-width: 1.4; stroke-linecap: round; }
+
+.top-actions { display: flex; flex: none; align-items: center; gap: 18px; }
+.lang-btn {
+  appearance: none;
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font: 500 14px/1 var(--sans);
+  cursor: pointer;
+  transition: border-color .2s;
+}
+.lang-btn:hover { border-color: var(--text); }
+/* English page: show the Arabic label in a system font, so English readers do not download an Arabic one */
+html[lang="en"] .lang-btn { font-family: system-ui, "Segoe UI", Tahoma, Arial, sans-serif; font-weight: 400; }
 
 .top-link { color: var(--muted); font-size: 14px; text-decoration: none; transition: color .2s; }
 .top-link:hover { color: var(--text); }
@@ -273,7 +295,7 @@ h1, h2 { margin: 0; color: var(--text); font-family: var(--serif); font-weight: 
 /* Lockout */
 .lockout-title { margin: 0; color: var(--bad); font-size: 15px; font-weight: 500; }
 .lockout-count { margin: 0; color: var(--text); font: 400 clamp(64px, 9vw, 104px)/1 var(--serif); font-variant-numeric: tabular-nums; }
-.lockout-count small { margin-left: 4px; color: var(--muted); font-size: .4em; }
+.lockout-count small { margin-inline-start: 4px; color: var(--muted); font-size: .4em; }
 
 /* Slide to unlock */
 .slider { position: absolute; left: 20px; right: 20px; bottom: 20px; z-index: 2; }
@@ -420,7 +442,7 @@ h1, h2 { margin: 0; color: var(--text); font-family: var(--serif); font-weight: 
   grid-row: 1;
   color: var(--muted);
   font: 300 22px/1 var(--sans);
-  text-align: right;
+  text-align: end;
   transition: rotate .2s, color .2s;
 }
 .fold > summary:hover::after { color: var(--text); }
@@ -429,7 +451,7 @@ h1, h2 { margin: 0; color: var(--text); font-family: var(--serif); font-weight: 
 .fold > summary h3 { grid-column: 2; margin: 0; color: var(--text); font: 400 24px/1.2 var(--serif); }
 .fold-sub { grid-column: 2; margin-top: 3px; color: var(--muted); font-size: 14.5px; line-height: 1.45; }
 
-.fold-body { padding: 4px 0 28px 44px; font-size: 15px; line-height: 1.55; }
+.fold-body { padding-block: 4px 28px; padding-inline-start: 44px; font-size: 15px; line-height: 1.55; }
 .fold-body > :first-child { margin-top: 0; }
 .fold-body > :last-child { margin-bottom: 0; }
 .fold-action { margin-bottom: 12px; }
@@ -473,7 +495,7 @@ h1, h2 { margin: 0; color: var(--text); font-family: var(--serif); font-weight: 
 .tip { position: absolute; bottom: calc(100% + 6px); z-index: 5; min-width: 120px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--bg-3); font: 12px/1.45 var(--mono); white-space: nowrap; pointer-events: none; }
 .tip[hidden] { display: none; }
 .tip .tip-title { margin-bottom: 2px; color: var(--muted); }
-.tip b { margin-right: 8px; }
+.tip b { margin-inline-end: 8px; }
 .tip span { color: var(--muted); }
 
 .scales { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 10px 0 6px; color: var(--muted); font: 11.5px var(--mono); }
@@ -614,6 +636,7 @@ h1, h2 { margin: 0; color: var(--text); font-family: var(--serif); font-weight: 
 
 @media (max-width: 560px) {
   .top { padding-bottom: 16px; }
+  .top-link { display: none; }
   .brand { font-size: 14px; }
   .hero h1 { font-size: clamp(42px, 12.5vw, 56px); }
   .steps { gap: 6px; font-size: 12.5px; }
@@ -636,7 +659,7 @@ h1, h2 { margin: 0; color: var(--text); font-family: var(--serif); font-weight: 
   .sign-emoji { font-size: 48px; }
 
   .fold > summary { grid-template-columns: 26px minmax(0, 1fr) 20px; column-gap: 8px; }
-  .fold-body { padding-left: 0; }
+  .fold-body { padding-inline-start: 0; }
 
   .ev { grid-template-columns: auto 1fr; }
   .ev-action, .ev-msg { grid-column: 1 / -1; }
@@ -647,3 +670,39 @@ h1, h2 { margin: 0; color: var(--text); font-family: var(--serif); font-weight: 
   .scanline { animation: none; }
   .lock-anim .shackle, .lock-anim .check, .success h2, .success .hint, .success .row, .challenge { animation-duration: .01s; animation-delay: 0s; }
 }
+
+/* ---------- 13. Arabic ---------- */
+
+/* Hidden for a moment while the Arabic text goes in (lang-init.js removes this after 1.5 s at most) */
+.i18n-pending body { visibility: hidden; }
+
+/* Arabic letters join up: any letter-spacing breaks the word, and italics do not exist in the script */
+html[lang="ar"] * { letter-spacing: 0 !important; }
+html[lang="ar"] em { font-style: normal; }
+
+html[lang="ar"] body { line-height: 1.75; }
+html[lang="ar"] :is(.lede, .consent, .facts div, .how-steps li, .disclaimer, .fold-body, .fold-sub, .lab-intro p, .status-text, .hint, .pin-hint, .sign-meaning, .sign-entry p, .small, .error) { line-height: 1.8; }
+
+/* Naskh sits smaller on the line than the Latin serif and needs room above and below */
+html[lang="ar"] .hero h1 { font-size: clamp(40px, 4.7vw, 66px); font-weight: 500; line-height: 1.32; }
+html[lang="ar"] :is(.how h2, .lab-intro h2) { font-size: clamp(32px, 3.8vw, 48px); font-weight: 500; line-height: 1.35; }
+html[lang="ar"] :is(.landing-title, .success h2) { font-weight: 500; line-height: 1.4; }
+html[lang="ar"] .landing-title { font-size: clamp(26px, 3vw, 38px); }
+html[lang="ar"] .fold > summary h3 { font-size: 22px; font-weight: 500; line-height: 1.5; }
+html[lang="ar"] .challenge-text { font-size: clamp(21px, 2.6vw, 26px); font-weight: 500; line-height: 1.45; }
+html[lang="ar"] .sign-word { font-size: clamp(25px, 2.8vw, 31px); font-weight: 500; line-height: 1.4; }
+html[lang="ar"] .sign-ar { font-size: .62em; }
+
+/* Right to left: controls flip with the reading direction */
+html[dir="rtl"] .switch-ui::after { left: auto; right: 3px; }
+html[dir="rtl"] .switch input:checked + .switch-ui::after { translate: -18px 0; }
+html[dir="rtl"] :is(.meter-bar, .progress-bar) { transform: scaleX(-1); }
+
+/* These read left to right in every language: code, numbers on a scale, and the slide-to-unlock track */
+.attacker pre { direction: ltr; text-align: left; }
+.scale { direction: ltr; }
+
+/* The threat model's row labels live in this file */
+html[lang="ar"] .fold td:nth-child(2)::before { content: "بدون دفاعات: "; }
+html[lang="ar"] .fold td:nth-child(3)::before { content: "في هذا العرض: "; }
+html[lang="ar"] .fold td:nth-child(4)::before { content: "تضيف الأنظمة الحقيقية: "; }

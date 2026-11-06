@@ -24,6 +24,7 @@ import {
 } from './gestures.js';
 import { FACE68, faceMetrics, medianMetrics, CHALLENGES, pickChallenges } from './liveness.js';
 import { SIGNS, classifySign, SignReader } from './signs.js';
+import { lang, t, m, en, say, plain, applyStatic, setLanguage, onLanguageChange } from './i18n.js';
 import { EventLog } from './eventlog.js';
 import { createXray } from './xray.js';
 import {
@@ -94,6 +95,7 @@ const CONFIG = {
 
 const $ = (id) => document.getElementById(id);
 const els = {
+  langBtn: $('langBtn'),
   stage: $('stage'), video: $('video'), overlay: $('overlay'),
   landing: $('landing'), startBtn: $('startBtn'), errorMsg: $('errorMsg'),
   slider: $('slider'), track: $('track'), fill: $('fill'), handle: $('handle'),
@@ -249,12 +251,12 @@ function saveSettings() {
 // UI helpers
 // ---------------------------------------------------------------------------
 
-function setStatus(text) {
-  els.statusText.textContent = text;
+function setStatus(text, vars) {
+  say(els.statusText, text, vars);
 }
 
-function showError(text) {
-  els.errorMsg.textContent = text;
+function showError(text, vars) {
+  say(els.errorMsg, text, vars);
   els.errorMsg.hidden = !text;
 }
 
@@ -295,7 +297,7 @@ function setMode(next) {
   els.signScreen.hidden = next !== 'signs';
   els.signEntry.hidden = next === 'signs' || handFailed;
   els.signBtn.disabled = ['loading', 'enrolling'].includes(next);
-  els.enrollBtn.textContent = enrolled ? 'Re-enroll my face' : 'Enroll my face';
+  say(els.enrollBtn, enrolled ? 'Re-enroll my face' : 'Enroll my face');
   els.deleteBtn.disabled = !enrolled || ['enrolling', 'loading'].includes(next);
 
   // Leaving the hand modes: forget hands and reset the slider
@@ -359,7 +361,7 @@ function cameraErrorMessage(err) {
     case 'InsecureContext':
       return 'The camera only works on HTTPS or on localhost. Open the demo over https:// or from a local server.';
     default:
-      return `Could not start the camera (${err?.message || err}).`;
+      return m('Could not start the camera ({error}).', { error: err?.message || err });
   }
 }
 
@@ -460,14 +462,14 @@ async function ensureHandTracking() {
     console.error('Hand tracking could not start:', err);
     handFailed = true;
     els.track.classList.add('touch');
-    els.trackLabel.textContent = 'drag with your finger to unlock';
+    say(els.trackLabel, 'drag with your finger to unlock');
     log.add('model_error', { level: 'warn', outcome: 'failure', message: 'Hand tracking is not available on this device: using touch for the slider' });
     if (mode === 'hand') setStatus('Hand tracking is not available on this device. Drag the handle to the right with your finger.');
     if (mode === 'unlocked') setStatus('Unlocked. Press "Lock again" to lock.');
     if (mode === 'signs') {
       setStatus('Hand tracking is not available on this device, so the sign translator cannot run here.');
-      els.signWord.textContent = 'Not available on this device';
-      els.signMeaning.textContent = 'This device could not start hand tracking.';
+      say(els.signWord, 'Not available on this device');
+      say(els.signMeaning, 'This device could not start hand tracking.');
     }
     els.signEntry.hidden = true;
     renderVault();
@@ -511,7 +513,7 @@ async function enroll() {
     if (mode !== 'enrolling') return; // user left (e.g. camera stopped)
     if (face) {
       samples.push(face.descriptor);
-      lastFace = { box: face.box, points: face.points, at: performance.now(), color: '#d8b26e', label: `sample ${samples.length}` };
+      lastFace = { box: face.box, points: face.points, at: performance.now(), color: '#d8b26e', label: t('sample {n}', { n: samples.length }) };
       updateEnrollProgress(samples.length);
     } else {
       setStatus('Enrolling: no face found. Look straight at the camera.');
@@ -535,7 +537,7 @@ async function enroll() {
   if (spread > CONFIG.enrollMaxSpread) {
     setMode(enrolled ? 'face' : 'enroll');
     setStatus('Enrollment failed: the samples did not agree. Make sure only you are in view and try again.');
-    log.add('enroll', { level: 'warn', outcome: 'failure', message: `Enrollment rejected: samples disagree (spread ${spread.toFixed(2)})`, fields: { spread } });
+    log.add('enroll', { level: 'warn', outcome: 'failure', message: m('Enrollment rejected: samples disagree (spread {s})', { s: spread.toFixed(2) }), fields: { spread } });
     return;
   }
 
@@ -543,7 +545,9 @@ async function enroll() {
   const persisted = store.save(enrolled);
   log.add('enroll', {
     level: 'success', outcome: 'success',
-    message: `Face template created from ${samples.length} samples (spread ${spread.toFixed(2)})${persisted ? '' : ', kept in memory only'}`,
+    message: m(persisted
+      ? 'Face template created from {n} samples (spread {s})'
+      : 'Face template created from {n} samples (spread {s}), kept in memory only', { n: samples.length, s: spread.toFixed(2) }),
     fields: { samples: samples.length, spread, persisted },
   });
   setMode('face');
@@ -555,7 +559,7 @@ async function enroll() {
 
 function updateEnrollProgress(n) {
   els.enrollFill.style.width = `${(n / CONFIG.enrollSamples) * 100}%`;
-  els.enrollText.textContent = `Sample ${n} / ${CONFIG.enrollSamples}`;
+  say(els.enrollText, 'Sample {n} / {total}', { n, total: CONFIG.enrollSamples });
 }
 
 /**
@@ -608,7 +612,7 @@ function onFaceFrame(face, now, detectMs) {
   }
   updateFailCount(now);
   if (settings.xray) {
-    els.statDetect.textContent = `${Math.round(detectMs)} ms`;
+    els.statDetect.textContent = t('{n} ms', { n: Math.round(detectMs) });
     els.statEar.textContent = metrics ? metrics.ear.toFixed(2) : '-';
     els.statYaw.textContent = metrics ? metrics.yaw.toFixed(2) : '-';
     els.statMouth.textContent = metrics ? metrics.mouth.toFixed(2) : '-';
@@ -653,11 +657,11 @@ function handleFaceResult(face, now, metrics, distance) {
     if (now - mismatchSince >= CONFIG.mismatchAttemptMs && due) {
       mismatchLoggedAt = now;
       registerFailure('face_mismatch',
-        `Face did not match (distance ${distance.toFixed(3)}, threshold ${settings.threshold.toFixed(2)})`,
+        m('Face did not match (distance {d}, threshold {t})', { d: distance.toFixed(3), t: settings.threshold.toFixed(2) }),
         { distance: round3(distance), threshold: settings.threshold });
       if (now < lockedUntil) return;
     }
-    setStatus(`Face does not match the enrolled face (distance ${distance.toFixed(2)}).`);
+    setStatus('Face does not match the enrolled face (distance {d}).', { d: distance.toFixed(2) });
     return;
   }
 
@@ -671,13 +675,13 @@ function handleFaceResult(face, now, metrics, distance) {
   const held = now - matchSince;
   els.stage.dataset.state = 'match';
   if (held < CONFIG.matchHoldMs) {
-    setStatus(`Face matches. Hold still… ${(held / 1000).toFixed(1)} / 1.0 s`);
+    setStatus('Face matches. Hold still… {held} / 1.0 s', { held: (held / 1000).toFixed(1) });
     return;
   }
 
   log.add('face_match', {
     level: 'success', outcome: 'success',
-    message: `Face matched (distance ${distance.toFixed(3)}, threshold ${settings.threshold.toFixed(2)})`,
+    message: m('Face matched (distance {d}, threshold {t})', { d: distance.toFixed(3), t: settings.threshold.toFixed(2) }),
     fields: { distance: round3(distance), threshold: settings.threshold },
   });
   lastFace = null;
@@ -689,18 +693,18 @@ function handleFaceResult(face, now, metrics, distance) {
 function updateMeter(distance) {
   if (distance == null) {
     els.meterFill.style.width = '0%';
-    els.distanceText.textContent = 'distance -';
+    say(els.distanceText, 'distance -');
     return;
   }
   els.meterFill.style.width = `${clamp(1 - distance, 0, 1) * 100}%`;
   els.meterFill.classList.toggle('ok', distance < settings.threshold);
-  els.distanceText.textContent = `distance ${distance.toFixed(3)}`;
+  say(els.distanceText, 'distance {d}', { d: distance.toFixed(3) });
 }
 
 function updateThresholdUI() {
   const t = settings.threshold;
   els.thresholdValue.textContent = t.toFixed(2);
-  els.thresholdText.textContent = `match < ${t.toFixed(2)}, held 1 s`;
+  say(els.thresholdText, 'match < {t}, held 1 s', { t: t.toFixed(2) });
   els.meterThreshold.style.left = `${(1 - t) * 100}%`;
   els.thresholdInput.value = t.toFixed(2);
 }
@@ -748,27 +752,27 @@ function startLiveness(now) {
     badFrames: 0,
   };
   nextChallenge(now);
-  log.add('liveness_start', { message: `Liveness challenges issued: ${names.join(', ')}`, fields: { challenges: names } });
+  log.add('liveness_start', { message: m('Liveness challenges issued: {names}', { names: names.join(', ') }), fields: { challenges: names } });
 }
 
 function nextChallenge(now) {
   const name = live.names[live.index];
   live.tracker = CHALLENGES[name].create(live.base);
   live.startedAt = now;
-  els.challengeStep.textContent = `Liveness check ${live.index + 1} / ${live.names.length}`;
+  say(els.challengeStep, 'Liveness check {n} / {total}', { n: live.index + 1, total: live.names.length });
   els.challengeIcon.replaceChildren(CHALLENGE_ICONS[name]());
-  els.challengeText.textContent = CHALLENGES[name].label;
-  setStatus(`Liveness check: ${CHALLENGES[name].label.toLowerCase()}.`);
+  say(els.challengeText, CHALLENGES[name].label);
+  setStatus('Liveness check: {action}.', { action: m(CHALLENGES[name].label.toLowerCase()) });
 }
 
 function handleLivenessResult(face, now, metrics, distance) {
   const name = live.names[live.index];
 
   if (now - live.startedAt > CONFIG.challengeTimeoutMs) {
-    return failLiveness(`no "${CHALLENGES[name].label.toLowerCase()}" within ${CONFIG.challengeTimeoutMs / 1000} s`);
+    return failLiveness(m('no "{action}" within {s} s', { action: m(CHALLENGES[name].label.toLowerCase()), s: CONFIG.challengeTimeoutMs / 1000 }));
   }
   if (!face) {
-    if (now - live.lastSeen > CONFIG.livenessLostMs) failLiveness('the face left the camera');
+    if (now - live.lastSeen > CONFIG.livenessLostMs) failLiveness(m('the face left the camera'));
     return;
   }
   live.lastSeen = now;
@@ -778,13 +782,13 @@ function handleLivenessResult(face, now, metrics, distance) {
   if (distance != null) {
     updateMeter(distance);
     live.badFrames = distance > settings.threshold + CONFIG.livenessSlack ? live.badFrames + 1 : 0;
-    if (live.badFrames >= 2) return failLiveness(`a different face appeared (distance ${distance.toFixed(2)})`);
+    if (live.badFrames >= 2) return failLiveness(m('a different face appeared (distance {d})', { d: distance.toFixed(2) }));
   }
 
   if (!live.tracker(metrics)) return;
 
   log.add('liveness_step', {
-    outcome: 'success', message: `Challenge passed: ${CHALLENGES[name].label.toLowerCase()}`,
+    outcome: 'success', message: m('Challenge passed: {action}', { action: m(CHALLENGES[name].label.toLowerCase()) }),
     fields: { challenge: name },
   });
   live.index += 1;
@@ -803,9 +807,10 @@ function handleLivenessResult(face, now, metrics, distance) {
 function failLiveness(reason) {
   const challenge = live?.names[live.index];
   setMode('face');
-  registerFailure('liveness_fail', `Liveness check failed: ${reason}`, { challenge, reason });
+  // The exported log keeps the reason in English, like every other logged message
+  registerFailure('liveness_fail', m('Liveness check failed: {reason}', { reason }), { challenge, reason: en(reason.text, reason.vars) });
   if (performance.now() >= lockedUntil) {
-    setStatus(`Liveness check failed: ${reason}. A photo or video cannot follow a random prompt. Look at the camera to try again.`);
+    setStatus('Liveness check failed: {reason}. A photo or video cannot follow a random prompt. Look at the camera to try again.', { reason });
   }
 }
 
@@ -829,7 +834,7 @@ function registerFailure(action, message, fields) {
     failures = [];
     log.add('lockout', {
       level: 'alert', outcome: 'failure',
-      message: `${CONFIG.maxFailures} failed attempts within ${CONFIG.failureWindowMs / 1000} s: face step locked for ${lockoutMs / 1000} s (possible spoofing or brute force)`,
+      message: m('{n} failed attempts within {w} s: face step locked for {l} s (possible spoofing or brute force)', { n: CONFIG.maxFailures, w: CONFIG.failureWindowMs / 1000, l: lockoutMs / 1000 }),
       fields: { failed_attempts: CONFIG.maxFailures, lockout_seconds: lockoutMs / 1000, strikes },
     });
     if (mode !== 'face') setMode('face');
@@ -852,7 +857,7 @@ function showLockout(now) {
   lastFace = null;
   matchSince = null;
   updateMeter(null);
-  setStatus(`Too many failed attempts. Face step locked for ${left} s.`);
+  setStatus('Too many failed attempts. Face step locked for {s} s.', { s: left });
 }
 
 function endLockout() {
@@ -941,7 +946,7 @@ function releaseHandle(opened) {
   if (opened && sliderPos >= CONFIG.unlockAt) {
     setSlider(1, false);
     log.add('unlock', settings.liveness
-      ? { level: 'success', outcome: 'success', message: `Unlocked: face + liveness + ${handFailed ? 'touch (no hand tracking on this device)' : 'gesture'}`, fields: { liveness: true } }
+      ? { level: 'success', outcome: 'success', message: m('Unlocked: face + liveness + {how}', { how: m(handFailed ? 'touch (no hand tracking on this device)' : 'gesture') }), fields: { liveness: true } }
       : { level: 'warn', outcome: 'success', message: 'Unlocked WITHOUT a liveness check: a photo could have done this', fields: { liveness: false } });
     setMode('unlocked');
   } else {
@@ -1047,7 +1052,7 @@ function expireHands(now) {
 function lock(method) {
   fistSince = null;
   const how = { fist: 'fist gesture', idle: 'inactivity', hidden: 'tab hidden' }[method] ?? 'button';
-  log.add('lock', { message: `Locked again (${how})`, fields: { method } });
+  log.add('lock', { message: m('Locked again ({how})', { how: m(how) }), fields: { method } });
   setMode('face');
   setStatus('Locked. Look at the camera to unlock again.');
 }
@@ -1066,16 +1071,37 @@ function updateSigns() {
   renderSign(signReader.update(sign?.id ?? null, now));
 }
 
-function renderSign(sign) {
-  if (sign === shownSign) return;
+function renderSign(sign, force = false) {
+  if (sign === shownSign && !force) return;
   shownSign = sign;
+  const ar = lang === 'ar';
   els.signEmoji.textContent = sign?.emoji ?? '✋';
-  els.signWord.textContent = sign?.word ?? 'Show a sign to the camera';
-  els.signAr.textContent = sign?.ar ?? '';
-  els.signMeaning.textContent = sign?.meaning ?? 'Try one of the signs listed below.';
-  els.signTag.textContent = sign?.tag ?? '';
+  if (sign) {
+    // The current language leads, the other one sits beside it
+    plain(els.signWord, ar ? sign.ar : sign.word);
+    plain(els.signAr, ar ? sign.word : sign.ar);
+    say(els.signMeaning, sign.meaning);
+    say(els.signTag, sign.tag);
+  } else {
+    say(els.signWord, 'Show a sign to the camera');
+    plain(els.signAr, '');
+    say(els.signMeaning, 'Try one of the signs listed below.');
+    say(els.signTag, '');
+  }
+  els.signAr.lang = ar ? 'en' : 'ar';
+  els.signAr.dir = ar ? 'ltr' : 'rtl';
   els.signTag.hidden = !sign;
   for (const li of els.signList.children) li.classList.toggle('on', li.dataset.sign === sign?.id);
+}
+
+function renderSignList() {
+  els.signList.replaceChildren(...SIGNS.map((s) => {
+    const li = document.createElement('li');
+    li.dataset.sign = s.id;
+    li.textContent = `${s.emoji} ${lang === 'ar' ? s.ar : s.word}`;
+    li.classList.toggle('on', s.id === shownSign?.id);
+    return li;
+  }));
 }
 
 async function startSigns() {
@@ -1142,10 +1168,10 @@ function renderVault() {
   } else {
     status = 'No vault yet. Choose a secret: a 6-digit gesture PIN (quick, but weak) or a passphrase of 12+ characters (strong).';
   }
-  if (!vault.busy) els.vaultStatus.textContent = status;
+  if (!vault.busy) say(els.vaultStatus, status);
   els.vaultSecretForm.hidden = !unlocked || open;
   els.vaultOpen.hidden = !open;
-  els.vaultSubmit.textContent = vault.record ? 'Decrypt' : 'Create vault';
+  say(els.vaultSubmit, vault.record ? 'Decrypt' : 'Create vault');
   els.vaultSubmit.disabled = vault.busy;
   els.gesturePinBtn.disabled = vault.busy || Boolean(vault.pin);
   els.gesturePinBtn.hidden = handFailed;
@@ -1156,39 +1182,38 @@ function renderVault() {
 /** "Attacker view": exactly what sits in localStorage (ciphertext shortened for display). */
 function updateAttackerView() {
   const r = vault.record;
-  els.vaultRaw.textContent = r
-    ? JSON.stringify({ ...r, ct: r.ct.length > 96 ? `${r.ct.slice(0, 96)}…` : r.ct }, null, 2)
-    : '(nothing stored yet)';
+  if (r) plain(els.vaultRaw, JSON.stringify({ ...r, ct: r.ct.length > 96 ? `${r.ct.slice(0, 96)}…` : r.ct }, null, 2));
+  else say(els.vaultRaw, '(nothing stored yet)');
   els.tamperBtn.disabled = !vault.key;
-  if (!vault.key) els.tamperResult.textContent = '';
+  if (!vault.key) plain(els.tamperResult, '');
 }
 
 /** Live strength estimate for the typed secret (nothing is sent or stored). */
 function updateStrength() {
   const secret = els.vaultSecret.value;
   if (!secret) {
-    els.vaultStrength.textContent = '';
+    plain(els.vaultStrength, '');
     return;
   }
   const { bits, guesses } = secretStrength(secret);
-  let text = `≈ ${Math.round(bits)} bits: ${formatCount(guesses)} possible secrets`;
+  let text = t('≈ {bits} bits: {count} possible secrets', { bits: Math.round(bits), count: formatCount(guesses) });
   if (vault.msPerGuess) {
-    text += `. Trying all of them on this device: ${formatDuration(guesses * vault.msPerGuess)} (a GPU cracker is far faster)`;
+    text += t('. Trying all of them on this device: {time} (a GPU cracker is far faster)', { time: formatDuration(guesses * vault.msPerGuess) });
   }
   const need = /^[1-5]+$/.test(secret) ? 6 : 12;
-  els.vaultStrength.textContent = secret.length < need ? `At least ${need} characters. ${text}` : text;
+  plain(els.vaultStrength, secret.length < need ? t('At least {need} characters. {text}', { need, text }) : text);
 }
 
-const formatCount = (n) => (n < 1e9 ? Math.round(n).toLocaleString('en') : `about 10^${Math.round(Math.log10(n))}`);
+const formatCount = (n) => (n < 1e9 ? Math.round(n).toLocaleString('en') : t('about 10^{n}', { n: Math.round(Math.log10(n)) }));
 
 function formatDuration(ms) {
   const s = ms / 1000;
-  if (s < 90) return `${Math.round(s)} s`;
-  if (s < 5400) return `${Math.round(s / 60)} min`;
-  if (s < 172800) return `${Math.round(s / 3600)} h`;
-  if (s < 3.15e7 * 2) return `${Math.round(s / 86400)} days`;
-  if (s < 3.15e13) return `${formatCount(s / 3.15e7)} years`;
-  return 'millions of years';
+  if (s < 90) return t('{n} s', { n: Math.round(s) });
+  if (s < 5400) return t('{n} min', { n: Math.round(s / 60) });
+  if (s < 172800) return t('{n} h', { n: Math.round(s / 3600) });
+  if (s < 3.15e7 * 2) return t('{n} days', { n: Math.round(s / 86400) });
+  if (s < 3.15e13) return t('{n} years', { n: formatCount(s / 3.15e7) });
+  return t('millions of years');
 }
 
 /** Time one key derivation once, so the strength estimate uses real numbers. */
@@ -1205,14 +1230,14 @@ async function submitSecret(secret, source) {
   if (vault.busy || mode !== 'unlocked') return;
   const minLength = source === 'passphrase' ? 12 : 6;
   if (secret.length < minLength) {
-    els.vaultStatus.textContent = source === 'passphrase'
+    say(els.vaultStatus, source === 'passphrase'
       ? 'A passphrase needs at least 12 characters. (A 6-digit PIN is the quick but weaker option.)'
-      : 'Use at least 6 digits.';
+      : 'Use at least 6 digits.');
     return;
   }
   vault.busy = true;
   renderVault();
-  els.vaultStatus.textContent = `Deriving the key (${KDF_ITERATIONS.toLocaleString('en')} PBKDF2 rounds)…`;
+  say(els.vaultStatus, 'Deriving the key ({n} PBKDF2 rounds)…', { n: KDF_ITERATIONS.toLocaleString('en') });
   const bits = Math.round(secretStrength(secret).bits);
   let wrong = false;
   try {
@@ -1227,7 +1252,7 @@ async function submitSecret(secret, source) {
       els.vaultNotes.value = '';
       log.add('vault_created', {
         level: 'success', outcome: 'success',
-        message: `Vault created: AES-256-GCM, key from PBKDF2-SHA256 (${KDF_ITERATIONS.toLocaleString('en')} rounds), ${source}, ≈${bits} bits`,
+        message: m('Vault created: AES-256-GCM, key from PBKDF2-SHA256 ({n} rounds), {source}, ≈{bits} bits', { n: KDF_ITERATIONS.toLocaleString('en'), source: m(source), bits }),
         fields: { secret_type: source, entropy_bits: bits, kdf_iterations: KDF_ITERATIONS },
       });
     } else {
@@ -1237,7 +1262,7 @@ async function submitSecret(secret, source) {
       const text = await decryptNotes(key, vault.record); // throws on a wrong secret
       Object.assign(vault, { key, salt, dirty: false });
       els.vaultNotes.value = text;
-      log.add('vault_open', { level: 'success', outcome: 'success', message: `Vault decrypted with ${source}`, fields: { secret_type: source } });
+      log.add('vault_open', { level: 'success', outcome: 'success', message: m('Vault decrypted with {source}', { source: m(source) }), fields: { secret_type: source } });
     }
   } catch (err) {
     if (err?.name !== 'OperationError') console.error(err);
@@ -1250,7 +1275,7 @@ async function submitSecret(secret, source) {
   }
   if (wrong) {
     registerFailure('vault_open_fail', 'Vault: wrong secret (AES-GCM authentication failed, nothing decrypted)', { secret_type: source });
-    if (mode === 'unlocked') els.vaultStatus.textContent = 'Wrong secret: nothing was decrypted. Failures count towards the lockout.';
+    if (mode === 'unlocked') say(els.vaultStatus, 'Wrong secret: nothing was decrypted. Failures count towards the lockout.');
   }
 }
 
@@ -1263,7 +1288,7 @@ async function saveVault() {
   vault.record = record;
   vaultStore.save(record);
   vault.dirty = false;
-  log.add('vault_saved', { outcome: 'success', message: `Notes encrypted and saved (${text.length} characters, new random IV)`, fields: { characters: text.length } });
+  log.add('vault_saved', { outcome: 'success', message: m('Notes encrypted and saved ({n} characters, new random IV)', { n: text.length }), fields: { characters: text.length } });
   updateAttackerView();
 }
 
@@ -1385,7 +1410,7 @@ function drawFaceBox(w, h, now) {
   ctx.stroke();
   ctx.shadowBlur = 0;
   ctx.fillStyle = color;
-  ctx.font = '500 13px "Geist Mono", ui-monospace, Consolas, monospace';
+  ctx.font = '500 13px "Geist Mono", "IBM Plex Sans Arabic", ui-monospace, Consolas, monospace';
   ctx.fillText(label, x + 4, Math.max(14, y - 8));
   ctx.restore();
 
@@ -1530,7 +1555,7 @@ function frame(now) {
   while (handCalls.length && now - handCalls[0] > 1000) handCalls.shift();
   if (settings.xray && now - handStatAt > 500) {
     handStatAt = now;
-    els.statHands.textContent = handsActive ? `${handCalls.length} fps` : 'idle';
+    els.statHands.textContent = handsActive ? t('{n} fps', { n: handCalls.length }) : t('idle');
   }
 }
 
@@ -1566,13 +1591,13 @@ els.startBtn.addEventListener('click', async () => {
       : 'Could not load the face / hand models. Reload the page and try again.');
     log.add(err?.isCamera ? 'camera_error' : 'model_error', { level: 'warn', outcome: 'failure', message: err?.name || String(err) });
     els.startBtn.disabled = false;
-    els.startBtn.textContent = 'Try again';
+    say(els.startBtn, 'Try again');
     setMode('landing');
     setStatus('Camera not started.');
     return;
   }
   log.add('camera_started', {
-    message: `Camera on (${els.video.videoWidth}x${els.video.videoHeight}), models ready in ${((performance.now() - t0) / 1000).toFixed(1)} s. Video stays in this tab.`,
+    message: m('Camera on ({w}x{h}), models ready in {s} s. Video stays in this tab.', { w: els.video.videoWidth, h: els.video.videoHeight, s: ((performance.now() - t0) / 1000).toFixed(1) }),
   });
   clearTimeout(slowHint);
   if (!LOW_POWER) ensureHandTracking(); // computers can afford to get it ready in advance
@@ -1596,6 +1621,26 @@ els.deleteBtn.addEventListener('click', () => {
   setMode(stream ? 'enroll' : mode);
   if (settings.xray) xray.drawEmbedding(null, null);
   setStatus('Your face data was deleted from this browser.');
+});
+
+// Language button: names the language it switches to, in that language
+function renderLangButton() {
+  const toArabic = lang !== 'ar';
+  els.langBtn.textContent = toArabic ? 'العربية' : 'English';
+  els.langBtn.lang = toArabic ? 'ar' : 'en';
+  els.langBtn.setAttribute('aria-label', toArabic ? 'Switch to Arabic' : 'التبديل إلى الإنجليزية');
+}
+els.langBtn.addEventListener('click', () => setLanguage(lang === 'ar' ? 'en' : 'ar'));
+onLanguageChange(() => {
+  renderLangButton();
+  renderSignList();
+  if (mode === 'signs' && !handFailed) renderSign(shownSign ?? null, true);
+  log.rerender();
+  updateStrength();
+  if (settings.xray) {
+    xray.drawEmbedding();
+    xray.drawChart();
+  }
 });
 
 els.lockBtn.addEventListener('click', () => lock('button'));
@@ -1646,7 +1691,9 @@ els.thresholdInput.addEventListener('change', () => {
   const t = settings.threshold;
   log.add('threshold_changed', {
     level: t > CONFIG.defaultThreshold ? 'warn' : 'info',
-    message: `Match threshold set to ${t.toFixed(2)}${t > CONFIG.defaultThreshold ? ' (looser: more false accepts)' : t < CONFIG.defaultThreshold ? ' (stricter: more false rejects)' : ' (default)'}`,
+    message: m(t > CONFIG.defaultThreshold
+      ? 'Match threshold set to {t} (looser: more false accepts)'
+      : t < CONFIG.defaultThreshold ? 'Match threshold set to {t} (stricter: more false rejects)' : 'Match threshold set to {t} (default)', { t: t.toFixed(2) }),
     fields: { threshold: t },
   });
 });
@@ -1672,12 +1719,12 @@ els.vaultDelete.addEventListener('click', () => {
   const now = performance.now();
   if (now - vault.deleteArmedAt > 3000) {
     vault.deleteArmedAt = now;
-    els.vaultDelete.textContent = 'Click again to delete';
-    setTimeout(() => { els.vaultDelete.textContent = 'Delete vault'; }, 3000);
+    say(els.vaultDelete, 'Click again to delete');
+    setTimeout(() => { say(els.vaultDelete, 'Delete vault'); }, 3000);
     return;
   }
   vault.deleteArmedAt = -Infinity;
-  els.vaultDelete.textContent = 'Delete vault';
+  say(els.vaultDelete, 'Delete vault');
   vaultStore.clear();
   Object.assign(vault, { record: null, key: null, salt: null, dirty: false });
   els.vaultNotes.value = '';
@@ -1688,9 +1735,9 @@ els.tamperBtn.addEventListener('click', async () => {
   if (!vault.key || !vault.record) return;
   try {
     await decryptNotes(vault.key, tamperedCopy(vault.record));
-    els.tamperResult.textContent = 'Unexpected: the tampered copy decrypted.';
+    say(els.tamperResult, 'Unexpected: the tampered copy decrypted.');
   } catch {
-    els.tamperResult.textContent = 'Rejected. Flipping one bit of the ciphertext breaks the AES-GCM authentication tag, so nobody can silently edit your notes either.';
+    say(els.tamperResult, 'Rejected. Flipping one bit of the ciphertext breaks the AES-GCM authentication tag, so nobody can silently edit your notes either.');
     log.add('vault_tamper_test', { outcome: 'success', message: 'Tampered ciphertext rejected by AES-GCM (integrity check works)' });
   }
 });
@@ -1705,16 +1752,14 @@ window.addEventListener('resize', () => {
 // Boot
 // ---------------------------------------------------------------------------
 
-for (const s of SIGNS) {
-  const li = document.createElement('li');
-  li.dataset.sign = s.id;
-  li.textContent = `${s.emoji} ${s.word}`;
-  els.signList.append(li);
-}
+renderLangButton();
+renderSignList();
 enrolled = store.load();
 updateThresholdUI();
 setMode('landing');
 setXray(settings.xray);
 log.add('session_start', { message: 'Page loaded. The camera is off until you press "Start camera".' });
 if (enrolled) setStatus('A face is already enrolled in this browser. Press "Start camera" to unlock.');
+applyStatic();
+document.documentElement.classList.remove('i18n-pending');
 requestAnimationFrame(frame);
